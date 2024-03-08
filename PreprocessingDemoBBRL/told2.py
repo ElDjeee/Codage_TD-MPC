@@ -93,16 +93,16 @@ class TOLD_Agent(Agent):
         self.optim.step()
 
 # Example usage
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-agent = TOLD_Agent(cfg=None, device=device)  # Ensure cfg is defined if needed
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# agent = TOLD_Agent(cfg=None, device=device)  # Ensure cfg is defined if needed
 
-# Create a dummy observation with the correct shape: [batch_size, channels, height, width]
-dummy_observation = torch.randn(1, 3 * agent.frame_stack, agent.img_size, agent.img_size).to(device)
+# # Create a dummy observation with the correct shape: [batch_size, channels, height, width]
+# dummy_observation = torch.randn(1, 3 * agent.frame_stack, agent.img_size, agent.img_size).to(device)
 
-# Set the observation for the agent and run the forward pass
-agent.set_observation(dummy_observation)
-agent.forward(t=0)
+# # Set the observation for the agent and run the forward pass
+# agent.set_observation(dummy_observation)
+# agent.forward(t=0)
 
-# Retrieve and print the latent representation
-latent_data = agent.get(("latent", 0))
-print("Latent representation shape:", latent_data.shape)
+# # Retrieve and print the latent representation
+# latent_data = agent.get(("latent", 0))
+# print("Latent representation shape:", latent_data.shape)
