@@ -1,21 +1,27 @@
+import hydra
+from omegaconf import DictConfig
 import torch
+from torch import distributions as pyd
 import bbrl
 from bbrl import get_arguments, get_class, instantiate_class
 from bbrl.agents import Agent
 from bbrl.workspace import Workspace
+from bbrl.agents import Agents, TemporalAgent
 import helper as h
 from copy import deepcopy
 from told2 import TOLD_Agent
 
+# for test (TMP)
+from demo import EnvAgent, ActionAgent
+
 class TDMPC_Agent(Agent):
     def __init__(self, agent_cfg):
         super().__init__()
-        self.device = agent_cfg["device"]
-        # Initialisez le modèle TOLD avec la configuration corrigée
-        self.model = TOLD_Agent(cfg=agent_cfg["model_cfg"], device=self.device)
+        self.device = torch.device(agent_cfg.device)
+        self.model = TOLD_Agent(cfg=agent_cfg.model_cfg, device=self.device)
         self.model_target = deepcopy(self.model)
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=agent_cfg["lr"])
-        self.aug = h.RandomShiftsAug(agent_cfg["aug_cfg"])
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=agent_cfg.lr)
+        self.aug = h.RandomShiftsAug(agent_cfg.model_cfg)
         
 
 
@@ -38,7 +44,7 @@ class TDMPC_Agent(Agent):
         # Mise à jour du réseau principal
         latent = self.model.h(obs)
         predicted_value = self.model.Q(latent, actions)
-        value_loss = mse(predicted_value, target_value)
+        value_loss = h.mse(predicted_value, target_value)
 
         # Optimisation
         self.optim.zero_grad()
@@ -70,7 +76,7 @@ class TDMPC_Agent(Agent):
 
         # Boucle de l'optimisation par l'algorithme Cross-Entropy Method (CEM)
         for i in range(self.agent_cfg["cem_iterations"]):  # Assurez-vous d'avoir défini cem_iterations dans votre config
-            actions = Normal(mean, std).sample([num_samples])
+            actions = pyd.Normal(mean, std).sample([num_samples])
             actions = actions.clamp(-1, 1)  # Assurez-vous que cette limite correspond à votre espace d'actions
 
             values = self.estimate_value(z, actions, horizon)
@@ -90,43 +96,27 @@ class TDMPC_Agent(Agent):
 
 
 
-# Configuration de l'agent TD-MPC
-agent_cfg = {
-    "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    "lr": 3e-4,
-    "model_cfg": {
-        "frame_stack": 3,
-        "num_channels": 32,
-        "img_size": 84,
-        "latent_dim": 50,
-        "action_dim": 2,  
-        "mlp_dim": 64,
-        "horizon": 5,
-        "num_samples": 100,
-        "cem_iterations": 5,
-        "elite_frac": 0.1,
-        "gamma": 0.99,  
-        "tau": 0.005,  
-    },
-    "aug_cfg": {}  
-}
+@hydra.main(config_path="config", config_name="default")
+def main(cfg: DictConfig):
+    # Initialisation de l'agent TD-MPC
+    tdmpc_agent = TDMPC_Agent(cfg)
 
-# Initialisation de l'agent TD-MPC
-tdmpc_agent = TDMPC_Agent(agent_cfg)
+    # Création de l'environnement et de l'agent d'action
+    env_agent = EnvAgent(img_size=84, num_stack=3, threshold=230, invert=True)
+    action_agent = ActionAgent(env_agent.env.action_space)
 
-# Création de l'environnement et de l'agent d'action
-env_agent = EnvAgent(img_size=84, num_stack=3, threshold=230, invert=True)
-action_agent = ActionAgent(env_agent.env.action_space)
+    # Composition des agents
+    composed_agent = Agents(env_agent, tdmpc_agent, action_agent)
+    temporal_agent = TemporalAgent(composed_agent)
 
-# Composition des agents
-composed_agent = Agents(env_agent, tdmpc_agent, action_agent)
-temporal_agent = TemporalAgent(composed_agent)
+    # Exécution dans l'espace de travail
+    workspace = Workspace()
+    n_steps = 100  # Définissez le nombre de pas de temps par épisode
+    temporal_agent(workspace, t=0, n_steps=n_steps)
 
-# Exécution dans l'espace de travail
-workspace = Workspace()
-n_steps = 100  # Définissez le nombre de pas de temps par épisode
-temporal_agent(workspace, t=0, n_steps=n_steps)
+    # Récupération et affichage des résultats
+    obs, actions, rewards, done = workspace["obs", "action", "reward", "done"]
+    print("Récompenses recueillies:", rewards)
 
-# Récupération et affichage des résultats
-obs, actions, rewards, done = workspace["obs", "action", "reward", "done"]
-print("Récompenses recueillies:", rewards)
+if __name__ == "__main__":
+    main()
