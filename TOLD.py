@@ -3,7 +3,10 @@ import helper as h
 import torch
 from torch import nn
 
-class TOLD(nn.Module):
+from bbrl.agents.agent import Agent
+from bbrl.workspace import Workspace
+
+class TOLD(Agent):
 	"""Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC."""
 	def __init__(self, cfg):
 		super().__init__()
@@ -44,3 +47,5 @@ class TOLD(nn.Module):
 		"""Predict state-action value (Q)."""
 		x = torch.cat([z, a], dim=-1)
 		return self._Q1(x), self._Q2(x)
+	
+	def forward(self, t, **kwargs): pass

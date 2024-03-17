@@ -6,20 +6,12 @@ import torch.nn.functional as F
 from torch import distributions as pyd
 from torch.distributions.utils import _standard_normal
 
+from bbrl.agents.agent import Agent
+from bbrl.workspace import Workspace
 
 __REDUCE__ = lambda b: 'mean' if b else 'none'
 
-
-def l1(pred, target, reduce=False):
-	"""Computes the L1-loss between predictions and targets."""
-	return F.l1_loss(pred, target, reduction=__REDUCE__(reduce))
-
-
-def mse(pred, target, reduce=False):
-	"""Computes the MSE loss between predictions and targets."""
-	return F.mse_loss(pred, target, reduction=__REDUCE__(reduce))
-
-
+# Utility functions -----------------------------------------------------
 def _get_out_shape(in_shape, layers):
 	"""Utility function. Returns the output shape of a network for a given input shape."""
 	x = torch.randn(*in_shape).unsqueeze(0)
@@ -39,7 +31,7 @@ def orthogonal_init(m):
 			nn.init.zeros_(m.bias)
 
 
-def ema(m, m_target, tau):
+def ema(m, m_target, tau): # transformer en Agent?
 	"""Update slow-moving average of online network (target network) at rate tau."""
 	with torch.no_grad():
 		for p, p_target in zip(m.parameters(), m_target.parameters()):
@@ -52,7 +44,38 @@ def set_requires_grad(net, value):
 		param.requires_grad_(value)
 
 
-class TruncatedNormal(pyd.Normal):
+# Agents ----------------------------------------------------------------
+def l1(pred, target, reduce=False):
+	"""Computes the L1-loss between predictions and targets."""
+	return F.l1_loss(pred, target, reduction=__REDUCE__(reduce))
+class L1LossAgent(Agent):
+	def __init__(self):
+		super().__init__()
+		
+	def forward(self, reduce=False, **kwargs): 
+		# d'après l'article sur salina. 
+		target = self.get("y")
+		pred = self.get("predicted_y")
+		loss = l1(pred, target, reduce)
+		self.set("loss", loss)
+
+	
+def mse(pred, target, reduce=False):
+	"""Computes the MSE loss between predictions and targets."""
+	return F.mse_loss(pred, target, reduction=__REDUCE__(reduce))
+
+class MSELossAgent(Agent):
+	def __init__(self):
+		super().__init__()
+
+	def forward(self, reduce=False, **kwargs): 
+		# d'après l'article sur salina.
+		target = self.get("y")
+		pred = self.get("predicted_y")
+		loss = mse(pred, target, reduce)
+		self.set("loss", loss)
+		
+class TruncatedNormal(pyd.Normal): # que faire?
 	"""Utility class implementing the truncated normal distribution."""
 	def __init__(self, loc, scale, low=-1.0, high=1.0, eps=1e-6):
 		super().__init__(loc, scale, validate_args=False)
@@ -76,24 +99,21 @@ class TruncatedNormal(pyd.Normal):
 		x = self.loc + eps
 		return self._clamp(x)
 
-
-class NormalizeImg(nn.Module):
+class NormalizeImg(Agent): # DONE
 	"""Normalizes pixel observations to [0,1) range."""
 	def __init__(self):
 		super().__init__()
 
-	def forward(self, x):
+	def forward(self, x, **kwargs):
 		return x.div(255.)
 
-
-class Flatten(nn.Module):
+class Flatten(Agent): # DONE
 	"""Flattens its input to a (batched) vector."""
 	def __init__(self):
 		super().__init__()
 		
-	def forward(self, x):
+	def forward(self, x, **kwargs):
 		return x.view(x.size(0), -1)
-
 
 def enc(cfg):
 	"""Returns a TOLD encoder."""
@@ -111,6 +131,16 @@ def enc(cfg):
 				  nn.Linear(cfg.enc_dim, cfg.latent_dim)]
 	return nn.Sequential(*layers)
 
+class EncoderAgent(Agent):
+	def __init__(self, cfg):
+		super().__init__()
+		self.fc = enc(cfg)
+
+	def forward(self, t, **kwargs): # ajouter le code de l'étudiant?
+		obs = self.get(("obs", t))
+		latent = self.fc(obs)
+		self.set(("latent", t), latent) 
+
 
 def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
 	"""Returns an MLP."""
@@ -121,14 +151,33 @@ def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
 		nn.Linear(mlp_dim[0], mlp_dim[1]), act_fn,
 		nn.Linear(mlp_dim[1], out_dim))
 
-def q(cfg, act_fn=nn.ELU()):
+class MLPAgent(Agent): 
+	def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
+		super().__init__()
+		self.fc = mlp(in_dim, mlp_dim, out_dim, act_fn)
+
+	def forward(self, t, **kwargs): 
+		obs = self.get(("obs", t))
+		res = self.fc(obs)
+		self.set(("pred", t), res) 
+
+
+def q(cfg, act_fn=nn.ELU()): # act_fn non utilisé?
 	"""Returns a Q-function that uses Layer Normalization."""
 	return nn.Sequential(nn.Linear(cfg.latent_dim+cfg.action_dim, cfg.mlp_dim), nn.LayerNorm(cfg.mlp_dim), nn.Tanh(),
 						 nn.Linear(cfg.mlp_dim, cfg.mlp_dim), nn.ELU(),
 						 nn.Linear(cfg.mlp_dim, 1))
 
+class QFunctionAgent(Agent):
+	def __init__(self, cfg, act_fn=nn.ELU()):
+		self.fc = q(cfg, act_fn)
 
-class RandomShiftsAug(nn.Module):
+	def forward(self, t, **kwargs): 
+		obs = self.get(("obs", t))
+		qfunc = self.fc(obs)
+		self.set(("q-func", t), qfunc)
+		
+class RandomShiftsAug(Agent): # DONE
 	"""
 	Random shift image augmentation.
 	Adapted from https://github.com/facebookresearch/drqv2
@@ -137,7 +186,7 @@ class RandomShiftsAug(nn.Module):
 		super().__init__()
 		self.pad = int(cfg.img_size/21) if cfg.modality == 'pixels' else None
 
-	def forward(self, x):
+	def forward(self, x, **kwargs):
 		if not self.pad:
 			return x
 		n, c, h, w = x.size()
@@ -154,8 +203,8 @@ class RandomShiftsAug(nn.Module):
 		grid = base_grid + shift
 		return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
 
-
-class Episode(object):
+# Workspace ? -----------------------------------------------------------
+class Episode(object): # fait le travail de workspace?
 	"""Storage object for a single episode."""
 	def __init__(self, cfg, init_obs):
 		self.cfg = cfg
@@ -189,7 +238,7 @@ class Episode(object):
 		self._idx += 1
 
 
-class ReplayBuffer():
+class ReplayBuffer(): # on en a plus besoin ? fait le travail de workspace
 	"""
 	Storage and sampling functionality for training TD-MPC / TOLD.
 	The replay buffer is stored in GPU memory when training from state.

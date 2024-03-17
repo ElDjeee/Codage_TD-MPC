@@ -7,19 +7,19 @@
 #
 
 import matplotlib.pyplot as plt
-
 import os
 import numpy as np
-
+import math
 from typing import Any
 
 import gymnasium as gym
 from gymnasium import register
 import gymnasium.vector.utils as g_utils
-from gymnasium import Space
+from gymnasium import Space, logger, spaces
 from gymnasium.core import ObsType, WrapperObsType
 from gymnasium.spaces import Box
-
+from gymnasium.envs.classic_control import utils
+from gymnasium.error import DependencyNotInstalled
 from gymnasium.wrappers import GrayScaleObservation, FrameStack, ResizeObservation
 
 
