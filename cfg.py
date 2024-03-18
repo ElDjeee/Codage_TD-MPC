@@ -1,54 +1,43 @@
 import os
 import re
-from omegaconf import OmegaConf
+import hydra
+from omegaconf import DictConfig
 from pathlib import Path
 
+@hydra.main(config_path="configs/", config_name="default.yaml")
+def main(cfg: DictConfig):
+    
+    told_model = TOLD(cfg)
 
-def parse_cfg(cfg_path: str) -> OmegaConf:
-	"""Parses a config file and returns an OmegaConf object."""
-	cfg_path = Path(cfg_path)
-	base_cfg_path = cfg_path / 'base.yaml'
- 
-	base = OmegaConf.load(base_cfg_path)
- 
-	
-	cli = OmegaConf.from_cli()
-	for k,v in cli.items():
-		if v == None:
-			cli[k] = True
-	base.merge_with(cli)
+    num_iterations = 10
 
-	# Modality config
-	if cli.get('modality', base.modality) not in {'state', 'pixels'}:
-		raise ValueError('Invalid modality: {}'.format(cli.get('modality', base.modality)))
-	modality = cli.get('modality', base.modality)
-	if modality != 'state':
-		mode = OmegaConf.load(cfg_path / f'{modality}.yaml')
-		base.merge_with(mode, cli)
+    for i in range(num_iterations):
+        print(f"Iteration: {i+1}")
 
-	# Task config
-	try:
-		domain, task = base.task.split('-', 1)
-	except:
-		raise ValueError(f'Invalid task name: {base.task}')
-	domain_path = cfg_path / 'tasks' / f'{domain}.yaml'
-	if not os.path.exists(domain_path):
-		domain_path = cfg_path / 'tasks' / 'pixels.yaml'
-	domain_cfg = OmegaConf.load(domain_path)
-	base.merge_with(domain_cfg, cli)
+        # Create a dummy observation
+        dummy_observation = torch.rand(1, cfg.frame_stack * 3, cfg.img_size, cfg.img_size)
 
-	# Algebraic expressions
-	for k,v in base.items():
-		if isinstance(v, str):
-			match = re.match(r'(\d+)([+\-*/])(\d+)', v)
-			if match:
-				base[k] = eval(match.group(1) + match.group(2) + match.group(3))
-				if isinstance(base[k], float) and base[k].is_integer():
-					base[k] = int(base[k])
+        # Pass the observation through the encoder to get the latent representation
+        latent_representation = told_model.h(dummy_observation)
 
-	# Convenience
-	base.task_title = base.task.replace('-', ' ').title()
-	base.device = 'mps' if base.modality == 'pixels' else 'mps'
-	base.exp_name = str(base.get('exp_name', 'pixels'))
+        # Sample an action from the policy
+        sampled_action = told_model.pi(latent_representation, std=0.1)
 
-	return base
+        # Use the latent representation and action to predict the next latent state and reward
+        next_latent, reward = told_model.next(latent_representation, sampled_action)
+
+        # Get the Q-values for the current state and action
+        q1, q2 = told_model.Q(latent_representation, sampled_action)
+
+        # Print the outputs for inspection
+        print("Latent Representation:", latent_representation.shape)
+        print("Next Latent State:", next_latent.shape)
+        print("Reward:", reward.shape)
+        print("Sampled Action:", sampled_action.shape)
+        print("Q1 Value:", q1.shape)
+        print("Q2 Value:", q2.shape)
+        print("\n")
+
+
+if __name__ == "__main__":
+    main()
