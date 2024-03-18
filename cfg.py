@@ -4,7 +4,7 @@ import hydra
 from omegaconf import DictConfig
 from pathlib import Path
 
-@hydra.main(config_path="configs/", config_name="default.yaml")
+@hydra.main(config_path="configs/", config_name="default1.yaml")
 def main(cfg: DictConfig):
     
     told_model = TOLD(cfg)
