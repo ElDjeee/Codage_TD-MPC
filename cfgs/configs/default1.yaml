@@ -1,0 +1,9 @@
+defaults:
+  - _self_
+
+frame_stack: 4
+img_size: 84
+num_channels: 32
+latent_dim: 64
+action_dim: 2
+mlp_dim: 256
