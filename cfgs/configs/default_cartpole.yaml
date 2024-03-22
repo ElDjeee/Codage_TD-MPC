@@ -52,4 +52,4 @@ algorithm:
             
 
 gym_env:
-      env_name: # ?
+      env_name: CartPole-v1
