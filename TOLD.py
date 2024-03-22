@@ -1,5 +1,3 @@
-from helper import *
-
 import torch
 from torch import nn
 from copy import deepcopy
@@ -8,6 +6,8 @@ from bbrl.agents import Agents, TemporalAgent
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
+from Agents import *
+from Utils import *
 
 class TOLD(Agent):
     """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC."""

@@ -420,38 +420,36 @@ class CartPoleEnv(gym.Env[np.ndarray, int | np.ndarray]):
             pygame.quit()
             self.isopen = False
 
-import gymnasium
-from gymnasium import register
+if __name__ == "__main__":
+    cartpole_spec = gym.spec("CartPole-v1")
+    register(
+        id="CartPole-v2",
+        entry_point= __name__ + ":CartPoleEnv",
+        max_episode_steps=cartpole_spec.max_episode_steps,
+        reward_threshold=cartpole_spec.reward_threshold,
+    )
 
-cartpole_spec = gymnasium.spec("CartPole-v1")
-register(
-    id="CartPole-v2",
-    entry_point= __name__ + ":CartPoleEnv",
-    max_episode_steps=cartpole_spec.max_episode_steps,
-    reward_threshold=cartpole_spec.reward_threshold,
-)
+    env = gym.make("CartPole-v2", render_mode="rgb_array")
+    env = PixelOnlyObservation(env)
+    env = ResizeObservation(env, 25) # (not needed with custom CartPoleEnv-v2)
 
-env = gym.make("CartPole-v2", render_mode="rgb_array")
-env = PixelOnlyObservation(env)
-env = ResizeObservation(env, 25) # (not needed with custom CartPoleEnv-v2)
+    env_gray = GrayScaleObservation(env=env)
+    env_bin_bw = BinarizeObservation(env=env_gray, threshold=230, invert=True)
+    env_bin_color = FrameStack(env=env_bin_bw, num_stack=3)
 
-env_gray = GrayScaleObservation(env=env)
-env_bin_bw = BinarizeObservation(env=env_gray, threshold=230, invert=True)
-env_bin_color = FrameStack(env=env_bin_bw, num_stack=3)
+    obs_bin_color, _ = env_bin_color.reset()
+    for i in range(4):
+        obs_bin_color, _, _, _, _ = env_bin_color.step(0)
 
-obs_bin_color, _ = env_bin_color.reset()
-for i in range(4):
-    obs_bin_color, _, _, _, _ = env_bin_color.step(0)
+    obs = np.array(obs_bin_color)
+    obs = np.moveaxis(obs, 0, -1)
+    save_dir = "outputs/"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
-obs = np.array(obs_bin_color)
-obs = np.moveaxis(obs, 0, -1)
-save_dir = "outputs/"
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
-
-plt.figure()
-name = save_dir + "preprocess_" + str(obs.shape)
-data = obs * 255
-plt.imshow(data)
-plt.imsave(name + ".png", data)
-plt.show()
+    plt.figure()
+    name = save_dir + "preprocess_" + str(obs.shape)
+    data = obs * 255
+    plt.imshow(data)
+    plt.imsave(name + ".png", data)
+    plt.show()
