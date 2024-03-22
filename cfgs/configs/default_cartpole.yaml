@@ -12,11 +12,16 @@ action_repeat: 8  #according to the previous cartpole.yaml file
 
 
 
-# The structure is inspired by BBRL/ td3
+# The structure bellow is inspired by BBRL/dqn and td3
 ﻿save_best: False
 plot_agents: False
-collect_stats: True
-stats_directory: ../../../src/bbrl_algos/algos/algorithm_stats/
+
+log_dir: ./tmp
+video_dir: ${log_dir}/videos
+
+hydra:
+  run:
+    dir: ${log_dir}/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 logger:
       classname: bbrl.utils.logger.TFLogger  #Our logger or the logger used in BBRL? 
@@ -28,30 +33,36 @@ logger:
 algorithm:
 
       seed:
-            train: 335
-            eval: 983
+            train: 33 
+            eval: 100
             q: 123
             explorer: 456
             torch: 789
-            act: 234
+            
 
       nb_seeds: 1
       n_envs: 1
       n_steps_train: 256
-      n_steps: 2_000_000
+      n_steps: 300_000
       max_grad_norm: 0.5
-      buffer_size: 1000000
-      batch_size: 256
+      
+      buffer:
+            max_size: 150000
+            batch_size: 256
+            learning_starts: 2000
+
       eval_interval: 2000
       nb_evals: 10
-      learning_starts: 5000
       tau_target: 0.005
       discount_factor: 0.99
       action_noise: 0.1
       optim_n_updates: 3
+      
       architecture:
             
             
 
 gym_env:
       env_name: CartPole-v1
+
+
