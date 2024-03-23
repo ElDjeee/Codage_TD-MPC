@@ -6,6 +6,7 @@ from bbrl.agents import Agents, TemporalAgent
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
+
 from Agents import *
 from Utils import *
 
@@ -56,6 +57,33 @@ class TOLD(Agent):
     def forward(self, t, **kwargs): pass
 
 # quelle méthode ? un agent TOLD ou une fonction qui gère tous les agents...
+#------------------------------------------------------------------------
+# We already made Train(Agent) and Evaluate(Agent) classes in train.py file ( without gymnasium) 
+# making train and evaluate agents ( using gymnasium). Inspired from bbrl examples  :
+
+def get_env_agents(cfg):
+    
+    eval_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=False,),
+        cfg.algorithm.nb_evals,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.eval,)
+
+    
+    train_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=True,),
+        cfg.algorithm.n_envs,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.train, )
+    
+    return train_env_agent, eval_env_agent
+
 
 
 def create_TOLD_agent(cfg, train_env_agent, eval_env_agent):
@@ -69,6 +97,96 @@ def create_TOLD_agent(cfg, train_env_agent, eval_env_agent):
     Q1_model, Q2_model = QFunctionAgent(cfg), QFunctionAgent(cfg)
     TOLD_agent = Agents(encoder, dynamics_model, reward_model,
                         policy_model, Q1_model, Q2_model)
+    
     t_agent = TemporalAgent(TOLD_agent)
-    workspace = Workspace()
-    t_agent(workspace, t=0)
+    tr_agent = Agents(train_env_agent, t_agent)  # , PrintAgent())
+    ev_agent = Agents(eval_env_agent, t_agent)
+    
+    #  agents that are executed on a complete workspace
+    train_agent = TemporalAgent(tr_agent)
+    eval_agent = TemporalAgent(ev_agent)
+
+    return train_agent, eval_agent, t_agent
+
+
+
+
+def run_tdmpc (cfg, logger, trial=None):
+    
+    # 1) Do we need to create the logger ? 
+    best_reward = float("-inf")
+    
+    # 2) Create the environment agents
+    train_env_agent, eval_env_agent = get_env_agents(cfg)
+
+    # 2) Create the TOLD agents
+    (train_agent, eval_agent, told_agent ) = create_TOLD_agent(cfg, train_env_agent, eval_env_agent)
+    ag_told = TemporalAgent(told_agent) 
+
+    # 3) Create the training workspace
+    train_workspace = Workspace()
+    rb = ReplayBuffer(max_size=cfg.algorithm.buffer_size)
+
+
+    
+    # 6) Define the steps counters and the train loop 
+    # nb_steps = 0
+    tmp_steps = 0
+
+    # Training loop
+    while nb_steps < cfg.algorithm.n_steps:
+        
+        # Execute the agent in the workspace
+        if nb_steps > 0:
+            train_workspace.zero_grad()
+            train_workspace.copy_n_last_steps(1)
+
+            train_agent(train_workspace, t=1, n_steps=cfg.algorithm.n_steps_train)
+        else:
+            train_agent(train_workspace, t=0, n_steps=cfg.algorithm.n_steps_train)
+
+        
+        transition_workspace = train_workspace.get_transitions(filter_key="env/done")
+        terminated, reward, action = transition_workspace["env/terminated","env/reward","action"]
+        
+        # nb_steps += action[0].shape[0]
+        
+        if nb_steps > 0 :
+            rb.put(transition_workspace)
+       
+        for _ in range(cfg.algorithm.optim_n_updates):
+            if nb_steps > cfg.algorithm.learning_starts:
+                rb_workspace = rb.get_shuffled(cfg.algorithm.batch_size)
+
+                # Collect episode from TDMPC 
+                # TOLD Update
+                # Compute TOLD Loss
+                # Store the loss
+        
+
+        # Evaluate the agent
+        if nb_steps - tmp_steps_eval > cfg.algorithm.eval_interval:
+            tmp_steps_eval = nb_steps
+            eval_workspace = Workspace()  
+            eval_agent(eval_workspace,t=0)
+            
+            rewards = eval_workspace["env/cumulated_reward"][-1]
+            logger.log_reward_losses(rewards, nb_steps)
+            mean = rewards.mean()
+            
+            if mean > best_reward:
+                best_reward = mean
+            print(f"nb_steps: {nb_steps}, reward , best )
+
+            # Is the trial done
+            # Save/log the best rewards
+            
+   return best_reward
+
+
+
+
+
+
+        # The t agent executing on the rb_workspace workspace
+        t_agent(workspace, t=0)
