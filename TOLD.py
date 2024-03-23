@@ -2,10 +2,15 @@ import torch
 from torch import nn
 from copy import deepcopy
 
-from bbrl.agents import Agents, TemporalAgent
+from bbrl.agents import Agents, TemporalAgent, PrintAgent
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
+
+import gymnasium as gym
+from gymnasium import Env
+from bbrl.agents.gymnasium import make_env, ParallelGymAgent
+from bbrl.utils.replay_buffer import ReplayBuffer
 
 from Agents import *
 from Utils import *
@@ -130,7 +135,7 @@ def run_tdmpc (cfg, logger, trial=None):
 
     
     # 6) Define the steps counters and the train loop 
-    # nb_steps = 0
+    nb_steps = 0
     tmp_steps = 0
 
     # Training loop
@@ -158,8 +163,8 @@ def run_tdmpc (cfg, logger, trial=None):
             if nb_steps > cfg.algorithm.learning_starts:
                 rb_workspace = rb.get_shuffled(cfg.algorithm.batch_size)
 
-                # Collect episode from TDMPC 
-                # TOLD Update
+                # Collect episode from TDMPC   
+                # TOLD Update   
                 # Compute TOLD Loss
                 # Store the loss
         
