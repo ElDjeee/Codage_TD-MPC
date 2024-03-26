@@ -10,7 +10,7 @@ gym.logger.set_level(40)
 import time
 import random
 from pathlib import Path
-from cfg import parse_cfg
+from main import parse_cfg
 from env import make_env
 from Utils import *
 from Agents import *

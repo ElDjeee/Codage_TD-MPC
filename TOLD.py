@@ -186,17 +186,8 @@ def run_tdmpc (cfg, logger, trial=None):
             
             if mean > best_reward:
                 best_reward = mean
-            print(f"nb_steps: {nb_steps}, reward , best )
+            print(f"nb_steps: {nb_steps}, reward , best")
 
             # Is the trial done
             # Save/log the best rewards
-            
-   return best_reward
-
-
-
-
-
-
-        # The t agent executing on the rb_workspace workspace
-        t_agent(workspace, t=0)
+    return best_reward
