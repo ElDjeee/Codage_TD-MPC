@@ -6,11 +6,11 @@ from bbrl.agents import Agents, TemporalAgent, PrintAgent
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
-
 import gymnasium as gym
 from gymnasium import Env
 from bbrl.agents.gymnasium import make_env, ParallelGymAgent
 from bbrl.utils.replay_buffer import ReplayBuffer
+from functools import partial
 
 from Agents import *
 from Utils import *
@@ -112,7 +112,7 @@ def create_TOLD_agent(cfg, train_env_agent, eval_env_agent):
     #  agents that are executed on a complete workspace
     train_agent = TemporalAgent(tr_agent)
     eval_agent = TemporalAgent(ev_agent)
-
+    
     return train_agent, eval_agent, t_agent
 
 
@@ -134,6 +134,9 @@ def run_tdmpc (cfg, logger, trial=None):
     train_workspace = Workspace()
     rb = ReplayBuffer(max_size=cfg.algorithm.buffer_size)
 
+    # The t_agent executing on  workspace.
+    # workspace=Workspace()
+    # t_agent(workspace, t=0)
 
     
     # 6) Define the steps counters and the train loop 
@@ -178,13 +181,22 @@ def run_tdmpc (cfg, logger, trial=None):
             eval_agent(eval_workspace,t=0)
             
             rewards = eval_workspace["env/cumulated_reward"][-1]
-            logger.log_reward_losses(rewards, nb_steps)
+            # logger.log_reward_losses(rewards, nb_steps)
             mean = rewards.mean()
             
             if mean > best_reward:
                 best_reward = mean
-            print(f"nb_steps: {nb_steps}, reward , best ")
+            print(f"nb_steps: {nb_steps}, reward , best )
 
             # Is the trial done
             # Save/log the best rewards
-    return best_reward
+            
+   return best_reward
+
+
+
+
+
+
+        # The t agent executing on the rb_workspace workspace
+        t_agent(workspace, t=0)
