@@ -3,8 +3,10 @@ import re
 import hydra
 from omegaconf import DictConfig
 from pathlib import Path
+from TOLD import TOLD
+import torch
 
-@hydra.main(config_path="configs/", config_name="default_cartpole.yaml")
+@hydra.main(config_path="cfgs/configs/", config_name="default_cartpole.yaml")
 def main(cfg: DictConfig):
     
     told_model = TOLD(cfg)

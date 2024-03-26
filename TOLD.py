@@ -14,6 +14,7 @@ from bbrl.utils.replay_buffer import ReplayBuffer
 
 from Agents import *
 from Utils import *
+from functools import partial
 
 class TOLD(Agent):
     """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC."""
@@ -61,7 +62,6 @@ class TOLD(Agent):
 
     def forward(self, t, **kwargs): pass
 
-# quelle méthode ? un agent TOLD ou une fonction qui gère tous les agents...
 #------------------------------------------------------------------------
 # We already made Train(Agent) and Evaluate(Agent) classes in train.py file ( without gymnasium) 
 # making train and evaluate agents ( using gymnasium). Inspired from bbrl examples  :
@@ -93,6 +93,8 @@ def get_env_agents(cfg):
 
 def create_TOLD_agent(cfg, train_env_agent, eval_env_agent):
     # inspiré de create_td3_agent de bbrl
+    # The t agent executing on the rb_workspace workspace
+    # t_agent(workspace, t=0)
 
     encoder = EncoderAgent(cfg)
     dynamics_model = MLPAgent(
@@ -181,17 +183,8 @@ def run_tdmpc (cfg, logger, trial=None):
             
             if mean > best_reward:
                 best_reward = mean
-            print(f"nb_steps: {nb_steps}, reward , best )
+            print(f"nb_steps: {nb_steps}, reward , best ")
 
             # Is the trial done
             # Save/log the best rewards
-            
-   return best_reward
-
-
-
-
-
-
-        # The t agent executing on the rb_workspace workspace
-        t_agent(workspace, t=0)
+    return best_reward

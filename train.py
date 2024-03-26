@@ -12,14 +12,14 @@ import random
 from pathlib import Path
 from cfg import parse_cfg
 from env import make_env
-from helper import Episode, ReplayBuffer
-import helper as h
+from Utils import *
+from Agents import *
 torch.backends.cudnn.benchmark = True
 __CONFIG__, __LOGS__ = 'cfgs', 'logs'
 
 from TOLD import TOLD
 from TDMPC import PlanningAgent, UpdateAgent
-from LoggerAgent import LoggerAgent
+# from Agents import LoggerAgent # à changer en logger de BBRL?
 
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
@@ -27,17 +27,12 @@ from bbrl.workspace import Workspace
 from omegaconf import OmegaConf
 from cfg import parse_cfg
 
-
-
 def set_seed(seed):
 	random.seed(seed)
 	np.random.seed(seed)
 	torch.manual_seed(seed)
 	if torch.cuda.is_available():
 		torch.cuda.manual_seed_all(seed)
-
-
-
 class EvaluateAgent(Agent):
 	def __init__(self, cfg, device, model):
 		super().__init__()
@@ -112,9 +107,6 @@ class EvaluateAgent(Agent):
 			episode_rewards.append(ep_reward)
 			if video: video.save(env_step)
 		return np.nanmean(episode_rewards)
-
-
-
 class TrainAgent(Agent):
 	def __init__(self, cfg, device, model):
 		super().__init__()
