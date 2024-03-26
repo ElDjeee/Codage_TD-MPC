@@ -25,7 +25,7 @@ from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
 from omegaconf import OmegaConf
-from cfg import parse_cfg
+from main import parse_cfg
 
 def set_seed(seed):
 	random.seed(seed)
