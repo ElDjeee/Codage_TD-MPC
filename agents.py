@@ -6,7 +6,7 @@ from torch import distributions as pyd
 from torch.distributions.utils import _standard_normal
 from bbrl.agents.agent import Agent
 
-from Utils import _get_out_shape
+from utils import _get_out_shape
 import preprocess
 import logger
 

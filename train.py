@@ -12,8 +12,8 @@ import random
 from pathlib import Path
 from main import parse_cfg
 from env import make_env
-from Utils import *
-from Agents import *
+from utils import *
+from agents import *
 torch.backends.cudnn.benchmark = True
 __CONFIG__, __LOGS__ = 'cfgs', 'logs'
 

@@ -12,8 +12,8 @@ from bbrl.agents.gymnasium import make_env, ParallelGymAgent
 from bbrl.utils.replay_buffer import ReplayBuffer
 from functools import partial
 
-from Agents import *
-from Utils import *
+from agents import *
+from utils import *
 from functools import partial
 
 class TOLD(Agent):
