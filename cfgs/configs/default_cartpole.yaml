@@ -7,6 +7,7 @@ num_channels: 32
 latent_dim: 64
 action_dim: 2
 mlp_dim: 256
+modality : 'pixels'
 
 action_repeat: 8  #according to the previous cartpole.yaml file
 

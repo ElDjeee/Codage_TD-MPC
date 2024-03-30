@@ -29,9 +29,13 @@ class TOLD(Agent):
         self._pi = MLPAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)
         self._Q1, self._Q2 = QFunctionAgent(cfg), QFunctionAgent(cfg)
         self.apply(orthogonal_init)
-        for m in [self._reward, self._Q1, self._Q2]:
-            m[-1].weight.data.fill_(0)
-            m[-1].bias.data.fill_(0)
+        self._reward.initialize_weights()
+        self._Q1.initialize_weights()
+        self._Q2.initialize_weights()
+        
+        # for m in [self._reward, self._Q1, self._Q2]:
+        #     m[-1].weight.data.fill_(0)
+        #     m[-1].bias.data.fill_(0)
 
     def track_q_grad(self, enable=True):
         """Utility function. Enables/disables gradient tracking of Q-networks."""
@@ -40,7 +44,7 @@ class TOLD(Agent):
 
     def h(self, obs):
         """Encodes an observation into its latent representation (h)."""
-        return self._encoder(obs)
+        return self._encoder.forward(t=0, obs=obs)
 
     def next(self, z, a):
         """Predicts next latent state (d) and single-step reward (R)."""

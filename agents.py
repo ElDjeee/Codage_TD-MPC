@@ -74,44 +74,40 @@ class TruncatedNormal(pyd.Normal):  # que faire?
         return self._clamp(x)
 
 
-class NormalizeImg(Agent):  # DONE
+class NormalizeImg(nn.Module):  
     """Normalizes pixel observations to [0,1) range."""
 
     def __init__(self):
         super().__init__()
 
-    def forward(self, x, **kwargs):
+    def forward(self, x):  
         return x.div(255.)
 
 
-class Flatten(Agent):  # DONE
-    """Flattens its input to a (batched) vector."""
-
+class Flatten(nn.Module):  
     def __init__(self):
-        super().__init__()
-
-    def forward(self, x, **kwargs):
+        super(Flatten, self).__init__()
+    
+    def forward(self, x): 
         return x.view(x.size(0), -1)
 
 
 def enc(cfg):
     """Returns a TOLD encoder."""
     if cfg.modality == 'pixels':
-        C = int(3*cfg.frame_stack)
+        C = int(3 * cfg.frame_stack)  # Corrected to dot notation
         layers = [NormalizeImg(),
                   nn.Conv2d(C, cfg.num_channels, 7, stride=2), nn.ReLU(),
-                  nn.Conv2d(cfg.num_channels, cfg.num_channels,
-                            5, stride=2), nn.ReLU(),
-                  nn.Conv2d(cfg.num_channels, cfg.num_channels,
-                            3, stride=2), nn.ReLU(),
+                  nn.Conv2d(cfg.num_channels, cfg.num_channels, 5, stride=2), nn.ReLU(),
+                  nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU(),
                   nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()]
         out_shape = _get_out_shape((C, cfg.img_size, cfg.img_size), layers)
-        layers.extend([Flatten(), nn.Linear(
-            np.prod(out_shape), cfg.latent_dim)])
+        layers.extend([Flatten(), nn.Linear(np.prod(out_shape), cfg.latent_dim)])
     else:
         layers = [nn.Linear(cfg.obs_shape[0], cfg.enc_dim), nn.ELU(),
                   nn.Linear(cfg.enc_dim, cfg.latent_dim)]
     return nn.Sequential(*layers)
+
 
 
 class EncoderAgent(Agent):
@@ -126,9 +122,9 @@ class EncoderAgent(Agent):
         self.fc = enc(cfg)
 
     def forward(self, t, **kwargs): 
-        obs = self.get(("obs", t))
+        obs = kwargs['obs']
         latent = self.fc(obs)
-        self.set(("latent", t), latent)
+        return latent
 
 
 def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
@@ -144,10 +140,18 @@ def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
 class MLPAgent(Agent):
     def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         super().__init__()
+        # Your existing initialization code
         self.fc = mlp(in_dim, mlp_dim, out_dim, act_fn)
 
-    def forward(self, t, **kwargs):
-        obs = self.get(("obs", t))
+    def initialize_weights(self):
+        # Initialize weights here
+        self.fc[-1].weight.data.fill_(0)
+        self.fc[-1].bias.data.fill_(0)
+
+    def forward(self, t=0, **kwargs):  # Rendre t optionnel
+        obs = kwargs.get('obs')
+        if obs is None:
+            obs = self.get(("obs", t))
         res = self.fc(obs)
         self.set(("pred", t), res)
 
@@ -159,15 +163,20 @@ def q(cfg, act_fn=nn.ELU()):  # act_fn non utilisé?
                          nn.Linear(cfg.mlp_dim, 1))
 
 
-class QFunctionAgent(Agent):  # à remplacer avec ContinuousQAgent de BBRL?
+class QFunctionAgent(nn.Module):  # Ensure this inherits from nn.Module
     def __init__(self, cfg, act_fn=nn.ELU()):
+        super(QFunctionAgent, self).__init__()  # Call the superclass initializer
         self.fc = q(cfg, act_fn)
+        
+    def initialize_weights(self):
+        # Assuming self.fc is an nn.Sequential model
+        self.fc[-1].weight.data.fill_(0)
+        self.fc[-1].bias.data.fill_(0)
 
     def forward(self, t, **kwargs):
         obs = self.get(("obs", t))
         qfunc = self.fc(obs)
         self.set(("q-func", t), qfunc)
-
 
 class RandomShiftsAug(Agent):  # DONE
     """
@@ -225,3 +234,5 @@ class LoggerAgent(Agent):
 
     def isVideoEnable(self):
         return self.logger.video is not None
+
+
