@@ -2,77 +2,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import distributions as pyd
-from torch.distributions.utils import _standard_normal
 from bbrl.agents.agent import Agent
+from bbrl_algos.models.critics import NamedCritic
+from bbrl_algos.models.actors import BaseActor
 
 from utils import _get_out_shape
 import preprocess
 import logger
-
-
-def __REDUCE__(b): return 'mean' if b else 'none'
-
-
-def l1(pred, target, reduce=False):
-    """Computes the L1-loss between predictions and targets."""
-    return F.l1_loss(pred, target, reduction=__REDUCE__(reduce))
-
-
-class L1LossAgent(Agent):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, reduce=False, **kwargs):
-        # d'après l'article sur salina.
-        target = self.get("y")
-        pred = self.get("predicted_y")
-        loss = l1(pred, target, reduce)
-        self.set("loss", loss)
-
-
-def mse(pred, target, reduce=False):
-    """Computes the MSE loss between predictions and targets."""
-    return F.mse_loss(pred, target, reduction=__REDUCE__(reduce))
-
-
-class MSELossAgent(Agent):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, reduce=False, **kwargs):
-        # d'après l'article sur salina.
-        target = self.get("y")
-        pred = self.get("predicted_y")
-        loss = mse(pred, target, reduce)
-        self.set("loss", loss)
-
-
-class TruncatedNormal(pyd.Normal):  # que faire?
-    """Utility class implementing the truncated normal distribution."""
-
-    def __init__(self, loc, scale, low=-1.0, high=1.0, eps=1e-6):
-        super().__init__(loc, scale, validate_args=False)
-        self.low = low
-        self.high = high
-        self.eps = eps
-
-    def _clamp(self, x):
-        clamped_x = torch.clamp(x, self.low + self.eps, self.high - self.eps)
-        x = x - x.detach() + clamped_x.detach()
-        return x
-
-    def sample(self, clip=None, sample_shape=torch.Size()):
-        shape = self._extended_shape(sample_shape)
-        eps = _standard_normal(shape,
-                               dtype=self.loc.dtype,
-                               device=self.loc.device)
-        eps *= self.scale
-        if clip is not None:
-            eps = torch.clamp(eps, -clip, clip)
-        x = self.loc + eps
-        return self._clamp(x)
-
 
 class NormalizeImg(Agent):  # DONE
     """Normalizes pixel observations to [0,1) range."""
@@ -83,7 +19,6 @@ class NormalizeImg(Agent):  # DONE
     def forward(self, x, **kwargs):
         return x.div(255.)
 
-
 class Flatten(Agent):  # DONE
     """Flattens its input to a (batched) vector."""
 
@@ -92,7 +27,6 @@ class Flatten(Agent):  # DONE
 
     def forward(self, x, **kwargs):
         return x.view(x.size(0), -1)
-
 
 def enc(cfg):
     """Returns a TOLD encoder."""
@@ -113,7 +47,6 @@ def enc(cfg):
                   nn.Linear(cfg.enc_dim, cfg.latent_dim)]
     return nn.Sequential(*layers)
 
-
 class EncoderAgent(Agent):
     def __init__(self, cfg):
         super().__init__()
@@ -123,13 +56,12 @@ class EncoderAgent(Agent):
         # 	GrayScaleObservation()
         # 	BinarizeObservation()
         # 	FrameStack()
-        self.fc = enc(cfg)
+        self.model = enc(cfg)
 
-    def forward(self, t, **kwargs): 
+    def forward(self, t, **kwargs):
         obs = self.get(("obs", t))
-        latent = self.fc(obs)
+        latent = self.model(obs)
         self.set(("latent", t), latent)
-
 
 def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
     """Returns an MLP."""
@@ -140,17 +72,36 @@ def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         nn.Linear(mlp_dim[0], mlp_dim[1]), act_fn,
         nn.Linear(mlp_dim[1], out_dim))
 
-
 class MLPAgent(Agent):
-    def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
+    def __init__(self, name, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         super().__init__()
-        self.fc = mlp(in_dim, mlp_dim, out_dim, act_fn)
+        self.model = mlp(in_dim, mlp_dim, out_dim, act_fn)
+        self.name = name
 
     def forward(self, t, **kwargs):
-        obs = self.get(("obs", t))
-        res = self.fc(obs)
-        self.set(("pred", t), res)
+        obs = self.get(("env/env_obs", t))
+        res = self.model(obs)
+        self.set((f"{self.name}", t), res)
 
+class ActorAgent(BaseActor): # actor = policy
+    """
+    inspiré de https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/models/actors.py#L56
+    """
+    def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU(), *args, **kwargs):
+        super.__init__(*args, **kwargs)
+        self.model = mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU())
+
+    def forward(self, t, **kwargs):
+        obs = self.get(("env/env_obs", t))
+        action = self.model(obs)
+        self.set(("action", t), action)
+
+    def predict_action(self, obs, stochastic=False):
+        """Predict just one action (without using the workspace)"""
+        assert (
+            not stochastic
+        ), "ContinuousDeterministicActor cannot provide stochastic predictions"
+        return self.model(obs)
 
 def q(cfg, act_fn=nn.ELU()):  # act_fn non utilisé?
     """Returns a Q-function that uses Layer Normalization."""
@@ -158,18 +109,30 @@ def q(cfg, act_fn=nn.ELU()):  # act_fn non utilisé?
                          nn.Linear(cfg.mlp_dim, cfg.mlp_dim), nn.ELU(),
                          nn.Linear(cfg.mlp_dim, 1))
 
+class CriticAgent(NamedCritic): # critic = Q-function
+    """
+    inspiré de https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/models/critics.py#L24
+    """
+    def __init__(self, cfg, act_fn=nn.ELU(), name="critic", *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+        self.model = q(cfg, act_fn)
+        self.is_q_function = True
 
-class QFunctionAgent(Agent):  # à remplacer avec ContinuousQAgent de BBRL?
-    def __init__(self, cfg, act_fn=nn.ELU()):
-        self.fc = q(cfg, act_fn)
+    def forward(self, t, detach_actions=False, **kwargs):
+        obs = self.get(("env/env_obs", t))
+        action = self.get(("action", t))
+        if detach_actions:
+            action = action.detach()
+        obs_act = torch.cat((obs, action), dim=1)
+        q_value = self.model(obs_act)
+        self.set((f"{self.name}/q_values", t), q_value)
 
-    def forward(self, t, **kwargs):
-        obs = self.get(("obs", t))
-        qfunc = self.fc(obs)
-        self.set(("q-func", t), qfunc)
+    def predict_value(self, obs, action): # fait le travail de la méthode Q de TOLD
+        obs_act = torch.cat((obs, action), dim=0)
+        q_value = self.model(obs_act)
+        return q_value
 
-
-class RandomShiftsAug(Agent):  # DONE
+class RandomShiftsAug(Agent): # DONE
     """
     Random shift image augmentation.
     Adapted from https://github.com/facebookresearch/drqv2
@@ -179,7 +142,8 @@ class RandomShiftsAug(Agent):  # DONE
         super().__init__()
         self.pad = int(cfg.img_size/21) if cfg.modality == 'pixels' else None
 
-    def forward(self, x, **kwargs):
+    def forward(self, t, **kwargs):
+        x = self.get(("env/env_obs", t)) # x = obs, obs or next_obs?
         if not self.pad:
             return x
         n, c, h, w = x.size()
@@ -196,7 +160,8 @@ class RandomShiftsAug(Agent):  # DONE
             0, 2 * self.pad + 1, size=(n, 1, 1, 2), device=x.device, dtype=x.dtype)
         shift *= 2.0 / (h + 2 * self.pad)
         grid = base_grid + shift
-        return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
+        next_obs = F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
+        self.set(("next_obs", t), next_obs)
 
 
 class LoggerAgent(Agent):
