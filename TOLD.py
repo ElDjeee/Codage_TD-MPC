@@ -1,14 +1,20 @@
-import copy
 import torch
-from bbrl.agents import Agents, TemporalAgent
+from torch import nn
+from copy import deepcopy
+
+from bbrl.agents import Agents, TemporalAgent, PrintAgent
 from bbrl.agents.agent import Agent
 from bbrl.workspace import Workspace
 
+import gymnasium as gym
+from gymnasium import Env
+from bbrl.agents.gymnasium import make_env, ParallelGymAgent
 from bbrl.utils.replay_buffer import ReplayBuffer
-from bbrl_algos.models.envs import get_env_agents
+from functools import partial
 
 from agents import *
 from utils import *
+from functools import partial
 
 class TOLD(Agent):
     """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC."""
@@ -18,10 +24,10 @@ class TOLD(Agent):
         self.cfg = cfg
         self._encoder = EncoderAgent(cfg)
         self._dynamics = MLPAgent(
-            "dynamics", cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, cfg.latent_dim)
-        self._reward = MLPAgent("reward", cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, 1)
-        self._pi = ActorAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)
-        self._Q1, self._Q2 = CriticAgent(cfg), CriticAgent(cfg)
+            cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, cfg.latent_dim)
+        self._reward = MLPAgent(cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, 1)
+        self._pi = MLPAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)
+        self._Q1, self._Q2 = QFunctionAgent(cfg), QFunctionAgent(cfg)
         self.apply(orthogonal_init)
         self._reward.initialize_weights()
         self._Q1.initialize_weights()
@@ -64,59 +70,59 @@ class TOLD(Agent):
 # We already made Train(Agent) and Evaluate(Agent) classes in train.py file ( without gymnasium) 
 # making train and evaluate agents ( using gymnasium). Inspired from bbrl examples  :
 
+def get_env_agents(cfg):
+    
+    eval_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=False,),
+        cfg.algorithm.nb_evals,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.eval,)
+
+    
+    train_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=True,),
+        cfg.algorithm.n_envs,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.train, )
+    
+    return train_env_agent, eval_env_agent
+
+
+
 def create_TOLD_agent(cfg, train_env_agent, eval_env_agent):
     # inspiré de create_td3_agent de bbrl
     # The t agent executing on the rb_workspace workspace
     # t_agent(workspace, t=0)
 
-    # TOLD 
     encoder = EncoderAgent(cfg)
     dynamics_model = MLPAgent(
         cfg.latent_dim + cfg.action_dim, cfg.mlp_dim, cfg.latent_dim)
     reward_model = MLPAgent(cfg.latent_dim + cfg.action_dim, cfg.mlp_dim, 1)
-    # policy
-    actor = ActorAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim, "actor")
-    # Q-function
-    critic_1, critic_2= CriticAgent(cfg), CriticAgent(cfg)
+    policy_model = MLPAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)
+    Q1_model, Q2_model = QFunctionAgent(cfg), QFunctionAgent(cfg)
     TOLD_agent = Agents(encoder, dynamics_model, reward_model,
-                        actor, critic_1, critic_2)
+                        policy_model, Q1_model, Q2_model)
     
-    # ajout de noise?
-    # Question
-    # https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/algos/td3/td3.py#L48
     t_agent = TemporalAgent(TOLD_agent)
     tr_agent = Agents(train_env_agent, t_agent)  # , PrintAgent())
     ev_agent = Agents(eval_env_agent, t_agent)
-
-    target_critic_1 = copy.deepcopy(critic_1).set_name("target-critic1")
-    target_critic_2 = copy.deepcopy(critic_2).set_name("target-critic2")
     
-    # agents that are executed on a complete workspace
+    #  agents that are executed on a complete workspace
     train_agent = TemporalAgent(tr_agent)
     eval_agent = TemporalAgent(ev_agent)
     
-    return (train_agent, eval_agent, t_agent, actor, critic_1, critic_2, target_critic_1, target_critic_2)
+    return train_agent, eval_agent, t_agent
 
-def compute_TOLD_loss(cfg, current_horizon, z, next_z, reward_pred, current_reward, critic_1, critic_2):
-    """
-    n'est pas fini
-    https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/tdmpc.py#L203
-    """
-    # with torch.no_grad(): # à faire
-    #     next_obs = aug(next_obses[t])
-    #     next_z = model_target.h(next_obs)
-    #     td_target = _td_target(next_obs, current_reward)
-    # Losses
-    rho = (cfg.rho ** current_horizon)
-    consistency_loss = rho * torch.mean(mse(z, next_z), dim=1, keepdim=True)
-    reward_loss = rho * mse(reward_pred, current_reward)
-    # value_loss = rho * (mse(critic_1, td_target) + mse(critic_2, td_target))
-    # priority_loss = rho * (l1(critic_1, td_target) + l1(critic_2, td_target))
-    return consistency_loss, reward_loss, # value_loss, priority_loss
 
-def compute_actor_loss(): pass
 
-def run_tdmpc(cfg, logger, trial=None):
+
+def run_tdmpc (cfg, logger, trial=None):
     
     # 1) Do we need to create the logger ? 
     best_reward = float("-inf")

@@ -2,9 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import distributions as pyd
+from torch.distributions.utils import _standard_normal
 from bbrl.agents.agent import Agent
-from bbrl_algos.models.critics import NamedCritic
-from bbrl_algos.models.actors import BaseActor
 
 from utils import _get_out_shape
 import preprocess
@@ -91,6 +91,7 @@ class Flatten(nn.Module):
     def forward(self, x): 
         return x.view(x.size(0), -1)
 
+
 def enc(cfg):
     """Returns a TOLD encoder."""
     if cfg.modality == 'pixels':
@@ -118,12 +119,13 @@ class EncoderAgent(Agent):
         # 	GrayScaleObservation()
         # 	BinarizeObservation()
         # 	FrameStack()
-        self.model = enc(cfg)
+        self.fc = enc(cfg)
 
     def forward(self, t, **kwargs): 
         obs = kwargs['obs']
         latent = self.fc(obs)
         return latent
+
 
 def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
     """Returns an MLP."""
@@ -134,8 +136,9 @@ def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         nn.Linear(mlp_dim[0], mlp_dim[1]), act_fn,
         nn.Linear(mlp_dim[1], out_dim))
 
+
 class MLPAgent(Agent):
-    def __init__(self, name, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
+    def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         super().__init__()
         # Your existing initialization code
         self.fc = mlp(in_dim, mlp_dim, out_dim, act_fn)
@@ -152,12 +155,6 @@ class MLPAgent(Agent):
         res = self.fc(obs)
         self.set(("pred", t), res)
 
-    def predict_action(self, obs, stochastic=False):
-        """Predict just one action (without using the workspace)"""
-        assert (
-            not stochastic
-        ), "ContinuousDeterministicActor cannot provide stochastic predictions"
-        return self.model(obs)
 
 def q(cfg, act_fn=nn.ELU()):  # act_fn non utilisé?
     """Returns a Q-function that uses Layer Normalization."""
@@ -191,8 +188,7 @@ class RandomShiftsAug(Agent):  # DONE
         super().__init__()
         self.pad = int(cfg.img_size/21) if cfg.modality == 'pixels' else None
 
-    def forward(self, t, **kwargs):
-        x = self.get(("env/env_obs", t)) # x = obs, obs or next_obs?
+    def forward(self, x, **kwargs):
         if not self.pad:
             return x
         n, c, h, w = x.size()
@@ -209,8 +205,7 @@ class RandomShiftsAug(Agent):  # DONE
             0, 2 * self.pad + 1, size=(n, 1, 1, 2), device=x.device, dtype=x.dtype)
         shift *= 2.0 / (h + 2 * self.pad)
         grid = base_grid + shift
-        next_obs = F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
-        self.set(("next_obs", t), next_obs)
+        return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
 
 
 class LoggerAgent(Agent):
