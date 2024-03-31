@@ -6,7 +6,7 @@ from bbrl.agents.agent import Agent
 from bbrl_algos.models.critics import NamedCritic
 from bbrl_algos.models.actors import BaseActor
 
-from MyOwn.utils import _get_out_shape
+from utils import _get_out_shape
 import preprocess
 import logger
 
