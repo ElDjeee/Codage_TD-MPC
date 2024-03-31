@@ -6,8 +6,8 @@ from bbrl.workspace import Workspace
 from bbrl.utils.replay_buffer import ReplayBuffer
 from bbrl_algos.models.envs import get_env_agents
 
-from agents import *
-from utils import *
+from agents_tdmpc import *
+from utils_tdmpc import *
 
 # ------------------------------------------------------------------------
 # We already made Train(Agent) and Evaluate(Agent) classes in train.py file ( without gymnasium)
