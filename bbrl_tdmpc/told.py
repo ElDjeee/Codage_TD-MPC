@@ -25,15 +25,36 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
 
     encoder = EncoderAgent(cfg)
     dynamics_model = MLPAgent(
-        cfg.latent_dim + cfg.action_dim, cfg.mlp_dim, cfg.latent_dim)
-    reward_model = MLPAgent(cfg.latent_dim + cfg.action_dim, cfg.mlp_dim, 1)
+        name="dynamics_model",
+        in_dim=cfg.latent_dim + cfg.action_dim, 
+        mlp_dim=cfg.mlp_dim, 
+        out_dim=cfg.latent_dim
+    )
+    reward_model = MLPAgent(
+        name="reward_model",
+        in_dim=cfg.latent_dim + cfg.action_dim, 
+        mlp_dim=cfg.mlp_dim, 
+        out_dim=1
+    )
     actor = ActorAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)  # policy
     critic_1, critic_2 = CriticAgent(cfg, name="critic1"), CriticAgent(cfg, name="critic2")  # Q-functions
-    told_agent = Agents(encoder, dynamics_model, reward_model,
-                        actor, critic_1, critic_2)
+    # agent TOLD
+    told_agent = Agents(encoder, dynamics_model, reward_model, actor, critic_1, critic_2)
+    
+    # -------- changement --------
     target_told_agent = copy.deepcopy(told_agent)
-    target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
-    target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
+
+    # On crée des clones des critiques avec de nouveaux noms pour le target agent
+    target_critic_1 = CriticAgent(cfg, name="target-critic1")
+    target_critic_2 = CriticAgent(cfg, name="target-critic2")
+    target_told_agent = Agents(encoder, dynamics_model, reward_model, actor, target_critic_1, target_critic_2)
+
+    
+    # target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
+    # target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
+    
+     # -------- changement --------
+    
     RandomShiftsAug_agent = RandomShiftsAug(cfg)
 
     tr_agent = Agents(train_env_agent, told_agent)
@@ -42,7 +63,8 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     # agents that are executed on a complete workspace
     train_agent = TemporalAgent(tr_agent)
     eval_agent = TemporalAgent(ev_agent)
-    train_agent.seed(cfg.algorithm.seed)
+    
+    #train_agent.seed(cfg.algorithm.seed)
     return (
         train_agent,
         eval_agent,
@@ -206,6 +228,7 @@ def run_tdmpc(cfg, logger, trial=None):
             tmp_steps_eval = nb_steps
             eval_workspace = Workspace()
             eval_agent(eval_workspace, t=0, stop_variable="env/done")
+            
             rewards = eval_workspace["env/cumulated_reward"][-1]
             ag_told(eval_workspace, t=0, stop_variable="env/done")
             q_values_1 = eval_workspace["critic/q_values"].squeeze()  #.squeeze()? this function is used when we want to remove single-dimensional entries from the shape of an array. 
@@ -227,7 +250,17 @@ def run_tdmpc(cfg, logger, trial=None):
             print(f"nb_steps: {nb_steps}, reward , best")
 
             # Is the trial done
+            if trial is not None:
+                print("trial is not None")
+                # reste du code
+            
+            if cfg.save_best and best_reward == mean:   
+                print("best reward == mean")
+                # reste du code
+            
     
             # Save/log the best rewards
     
     return best_reward
+
+

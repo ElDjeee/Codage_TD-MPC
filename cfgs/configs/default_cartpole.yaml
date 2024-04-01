@@ -4,7 +4,7 @@ defaults:
 frame_stack: 4
 img_size: 84
 num_channels: 32
-latent_dim: 64
+latent_dim: 256
 action_dim: 2
 mlp_dim: 256
 modality : 'pixels'

@@ -20,19 +20,11 @@ def mse(pred, target, reduce=False):
 def _get_out_shape(in_shape, layers):
 	"""Utility function. Returns the output shape of a network for a given input shape."""
 	x = torch.randn(*in_shape).unsqueeze(0)
-	return (nn.Sequential(*layers) if isinstance(layers, list) else layers)(x).squeeze(0).shape
+	with torch.no_grad(): 
+		x = nn.Sequential(*layers)(x)
+	return x.shape[1:] # retourne la forme dans la dimension batch
 
-def orthogonal_init(m): # différente approche que ortho_init de BBRL
-	"""Orthogonal layer initialization."""
-	if isinstance(m, nn.Linear):
-		nn.init.orthogonal_(m.weight.data)
-		if m.bias is not None:
-			nn.init.zeros_(m.bias)
-	elif isinstance(m, nn.Conv2d):
-		gain = nn.init.calculate_gain('relu')
-		nn.init.orthogonal_(m.weight.data, gain)
-		if m.bias is not None:
-			nn.init.zeros_(m.bias)
+	#return (nn.Sequential(*layers) if isinstance(layers, list) else layers)(x).squeeze(0).shape
 
 def ema(m, m_target, tau): # à utiliser soft_update_params de BBRL
 	"""Update slow-moving average of online network (target network) at rate tau."""

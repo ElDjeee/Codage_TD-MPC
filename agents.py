@@ -7,7 +7,8 @@ from torch.distributions.utils import _standard_normal
 from bbrl.agents.agent import Agent
 
 from utils import _get_out_shape
-import preprocess
+# import preprocess
+from preprocess import *
 import logger
 
 

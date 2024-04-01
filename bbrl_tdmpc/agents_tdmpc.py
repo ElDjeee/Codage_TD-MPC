@@ -7,8 +7,10 @@ from bbrl_algos.models.critics import NamedCritic
 from bbrl_algos.models.actors import BaseActor
 
 from utils_tdmpc import _get_out_shape
-import preprocess
-import logger
+# import preprocess
+from preprocess import *
+# import logger
+from logger import *
 
 class NormalizeImg(Agent):  # DONE
     """Normalizes pixel observations to [0,1) range."""
@@ -30,24 +32,54 @@ class Flatten(Agent):  # DONE
         obs = self.get(("env/env_obs", t)) # obs ou latent?
         return obs.view(obs.size(0), -1)
 
+# def enc(cfg):
+#     """Returns a TOLD encoder."""
+#     if cfg.modality == 'pixels':
+#         C = int(3*cfg.frame_stack)
+#         layers = [NormalizeImg(),
+#                   nn.Conv2d(C, cfg.num_channels, 7, stride=2), nn.ReLU(),
+#                   nn.Conv2d(cfg.num_channels, cfg.num_channels,5, stride=2), nn.ReLU(),
+#                   nn.Conv2d(cfg.num_channels, cfg.num_channels,3, stride=2), nn.ReLU(),
+#                   nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()]
+#         out_shape = _get_out_shape((C, cfg.img_size, cfg.img_size), layers)
+#         layers.extend([Flatten(), nn.Linear(np.prod(out_shape), cfg.latent_dim)])
+#     else:
+#         layers = [nn.Linear(cfg.obs_shape[0], cfg.enc_dim), nn.ELU(),
+#                   nn.Linear(cfg.enc_dim, cfg.latent_dim)]
+#     return nn.Sequential(*layers)
+
+
+
 def enc(cfg):
-    """Returns a TOLD encoder."""
+    """Returns a TOLD encoder without relying on agents that require 't'."""
     if cfg.modality == 'pixels':
-        C = int(3*cfg.frame_stack)
-        layers = [NormalizeImg(),
-                  nn.Conv2d(C, cfg.num_channels, 7, stride=2), nn.ReLU(),
-                  nn.Conv2d(cfg.num_channels, cfg.num_channels,
-                            5, stride=2), nn.ReLU(),
-                  nn.Conv2d(cfg.num_channels, cfg.num_channels,
-                            3, stride=2), nn.ReLU(),
-                  nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()]
-        out_shape = _get_out_shape((C, cfg.img_size, cfg.img_size), layers)
-        layers.extend([Flatten(), nn.Linear(
-            np.prod(out_shape), cfg.latent_dim)])
+        C = int(3 * cfg.frame_stack)
+        conv_layers = [
+            nn.Conv2d(C, cfg.num_channels, 7, stride=2, padding=3), nn.ReLU(),
+            nn.Conv2d(cfg.num_channels, cfg.num_channels, 5, stride=2, padding=2), nn.ReLU(),
+            nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2, padding=1), nn.ReLU(),
+            nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2, padding=1), nn.ReLU(),
+        ]
+        # Simulez la propagation avant pour déterminer la forme de sortie
+        x = torch.randn(1, C, cfg.img_size, cfg.img_size)
+        with torch.no_grad():
+            for layer in conv_layers:
+                x = layer(x)
+        linear_input_size = np.prod(x.shape[1:])
+        final_layers = [
+            nn.Flatten(),
+            nn.Linear(linear_input_size, cfg.latent_dim),
+        ]
+        return nn.Sequential(*conv_layers, *final_layers)
     else:
-        layers = [nn.Linear(cfg.obs_shape[0], cfg.enc_dim), nn.ELU(),
-                  nn.Linear(cfg.enc_dim, cfg.latent_dim)]
-    return nn.Sequential(*layers)
+        return nn.Sequential(
+            nn.Linear(cfg.obs_shape[0], cfg.enc_dim), nn.ELU(),
+            nn.Linear(cfg.enc_dim, cfg.latent_dim),
+        )
+
+        
+    #return nn.Sequential(*layers)
+
 
 class EncoderAgent(Agent):
     def __init__(self, cfg):
@@ -80,7 +112,12 @@ def mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
 class MLPAgent(Agent):
     def __init__(self, name, in_dim, mlp_dim, out_dim, act_fn=nn.ELU()):
         super().__init__()
-        self.net = mlp(in_dim, mlp_dim, out_dim, act_fn)
+        #self.net = mlp(in_dim, mlp_dim, out_dim, act_fn)
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, mlp_dim), act_fn,
+            nn.Linear(mlp_dim, mlp_dim), act_fn,
+            nn.Linear(mlp_dim, out_dim)
+        )
         self.name = name
 
     def forward(self, t, **kwargs):
@@ -98,7 +135,8 @@ class ActorAgent(BaseActor): # actor = policy
     inspiré de https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/models/actors.py#L56
     """
     def __init__(self, in_dim, mlp_dim, out_dim, act_fn=nn.ELU(), *args, **kwargs):
-        super.__init__(*args, **kwargs)
+        #super.__init__(*args, **kwargs)
+        super(ActorAgent, self).__init__(*args, **kwargs) 
         self.net = mlp(in_dim, mlp_dim, out_dim, act_fn=nn.ELU())
 
     def forward(self, t, **kwargs):
