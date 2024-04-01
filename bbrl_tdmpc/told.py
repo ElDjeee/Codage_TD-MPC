@@ -205,16 +205,29 @@ def run_tdmpc(cfg, logger, trial=None):
         if nb_steps - tmp_steps_eval > cfg.algorithm.eval_interval:
             tmp_steps_eval = nb_steps
             eval_workspace = Workspace()
-            eval_agent(eval_workspace, t=0)
-
+            eval_agent(eval_workspace, t=0, stop_variable="env/done")
             rewards = eval_workspace["env/cumulated_reward"][-1]
-            # logger.log_reward_losses(rewards, nb_steps)
+            ag_told(eval_workspace, t=0, stop_variable="env/done")
+            q_values_1 = eval_workspace["critic/q_values"]  #.squeeze()? this function is used when we want to remove single-dimensional entries from the shape of an array. 
+            delta = q_values_1 - rewards
+            maxi_delta = delta.max(axis=0)[0].detach().numpy()
+            delta_list.append(maxi_delta)
             mean = rewards.mean()
+            logger.log_reward_losses(rewards, nb_steps)
+            if mean > best_reward:
+                best_reward = mean
+            print(f"nb_steps: {nb_steps}, reward: {mean:.2f}, best: {best_reward:.2f}")
+
+            # logger ??????
+            # logger.log_reward_losses(rewards, nb_steps)
+
 
             if mean > best_reward:
                 best_reward = mean
             print(f"nb_steps: {nb_steps}, reward , best")
 
             # Is the trial done
+    
             # Save/log the best rewards
+    
     return best_reward
