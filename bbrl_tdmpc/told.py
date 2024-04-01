@@ -208,7 +208,7 @@ def run_tdmpc(cfg, logger, trial=None):
             eval_agent(eval_workspace, t=0, stop_variable="env/done")
             rewards = eval_workspace["env/cumulated_reward"][-1]
             ag_told(eval_workspace, t=0, stop_variable="env/done")
-            q_values_1 = eval_workspace["critic/q_values"]  #.squeeze()? this function is used when we want to remove single-dimensional entries from the shape of an array. 
+            q_values_1 = eval_workspace["critic/q_values"].squeeze()  #.squeeze()? this function is used when we want to remove single-dimensional entries from the shape of an array. 
             delta = q_values_1 - rewards
             maxi_delta = delta.max(axis=0)[0].detach().numpy()
             delta_list.append(maxi_delta)
