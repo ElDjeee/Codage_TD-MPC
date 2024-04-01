@@ -30,9 +30,14 @@ logger:
       verbose: False
       every_n_seconds: 10
 
-
+lr: 0.001
 algorithm:
+      train_steps: 1000
+      episode_length: 100
+      buffer_size: 10000  
+        
 
+      
       seed:
             train: 33 
             eval: 100

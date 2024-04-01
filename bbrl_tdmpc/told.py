@@ -25,13 +25,13 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
 
     encoder = EncoderAgent(cfg)
     dynamics_model = MLPAgent(
-        name="dynamics_model",
+        name="dynamics",
         in_dim=cfg.latent_dim + cfg.action_dim, 
         mlp_dim=cfg.mlp_dim, 
         out_dim=cfg.latent_dim
     )
     reward_model = MLPAgent(
-        name="reward_model",
+        name="reward",
         in_dim=cfg.latent_dim + cfg.action_dim, 
         mlp_dim=cfg.mlp_dim, 
         out_dim=1
@@ -153,7 +153,11 @@ def run_tdmpc(cfg, logger, trial=None):
 
     # Training loop
     for step in range(0, cfg.train_steps+cfg.episode_length, cfg.episode_length):
+        # follow the steps of the algorithm
+        print(f"Step {step}")
+        
         # Execute the agent in the workspace
+        
         if step > 0:
             train_workspace.zero_grad()
             train_workspace.copy_n_last_steps(1)

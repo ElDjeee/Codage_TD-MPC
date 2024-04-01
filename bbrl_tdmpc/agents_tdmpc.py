@@ -60,7 +60,7 @@ def enc(cfg):
             nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2, padding=1), nn.ReLU(),
             nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2, padding=1), nn.ReLU(),
         ]
-        # Simulez la propagation avant pour déterminer la forme de sortie
+        
         x = torch.randn(1, C, cfg.img_size, cfg.img_size)
         with torch.no_grad():
             for layer in conv_layers:
