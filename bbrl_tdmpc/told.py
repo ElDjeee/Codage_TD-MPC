@@ -1,6 +1,6 @@
 import copy
 import torch
-from bbrl.agents import Agent, Agents, TemporalAgent
+from bbrl.agents import Agents, TemporalAgent
 from bbrl.workspace import Workspace
 
 from bbrl.utils.replay_buffer import ReplayBuffer
@@ -17,7 +17,6 @@ from utils_tdmpc import *
 def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     """
     inspiré de create_td3_agent de bbrl
-    The t agent executing on the rb_workspace workspace
     ajout de noise?
     Question
     https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/algos/td3/td3.py#L48
@@ -38,26 +37,20 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     )
     actor = ActorAgent(cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)  # policy
     critic_1, critic_2 = CriticAgent(cfg, name="critic1"), CriticAgent(cfg, name="critic2")  # Q-functions
-    # agent TOLD
-    told_agent = Agents(encoder, dynamics_model, reward_model, actor, critic_1, critic_2)
+    told_agent = Agents(encoder, dynamics_model, reward_model, actor, critic_1, critic_2) # agent TOLD
     
     # -------- changement --------
-    target_told_agent = copy.deepcopy(told_agent)
+    # target_told_agent = copy.deepcopy(told_agent) est-ce qu'on en a besoin?
 
     # On crée des clones des critiques avec de nouveaux noms pour le target agent
     target_critic_1 = CriticAgent(cfg, name="target-critic1")
     target_critic_2 = CriticAgent(cfg, name="target-critic2")
     target_told_agent = Agents(encoder, dynamics_model, reward_model, actor, target_critic_1, target_critic_2)
-
-    
-    # target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
-    # target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
-    
-     # -------- changement --------
+    # -------- changement --------
     
     RandomShiftsAug_agent = RandomShiftsAug(cfg)
 
-    tr_agent = Agents(train_env_agent, told_agent)
+    tr_agent = Agents(train_env_agent, told_agent) # doit-on ajouter le traget agent?
     ev_agent = Agents(eval_env_agent, told_agent)
 
     # agents that are executed on a complete workspace
@@ -133,7 +126,7 @@ def run_tdmpc(cfg, logger, trial=None):
         target_told_agent,
         RandomShiftsAug_agent
     ) = create_told_agent(cfg, train_env_agent, eval_env_agent)
-    ag_told = TemporalAgent(told_agent)  # on en a pas besoin?
+    ag_told = TemporalAgent(told_agent)
     ag_target = TemporalAgent(target_told_agent)
     ag_rsa = TemporalAgent(RandomShiftsAug_agent)
 
@@ -157,7 +150,6 @@ def run_tdmpc(cfg, logger, trial=None):
         print(f"Step {step}")
         
         # Execute the agent in the workspace
-        
         if step > 0:
             train_workspace.zero_grad()
             train_workspace.copy_n_last_steps(1)
@@ -166,7 +158,7 @@ def run_tdmpc(cfg, logger, trial=None):
             
             train_agent(train_workspace, t=0, n_steps=cfg.algorithm.n_steps_train)
 
-        transition_workspace = train_workspace.get_transitions()  # pourquoi filter_key?
+        transition_workspace = train_workspace.get_transitions() 
         action = transition_workspace["action"]
         nb_steps += action[0].shape[0]
         if step > 0 or cfg.algorithm.n_steps > 1:
@@ -178,33 +170,23 @@ def run_tdmpc(cfg, logger, trial=None):
                 rb_workspace = rb.get_shuffled(cfg.algorithm.batch_size)
                 # Collect episode from TDMPC
                 obs, next_obs, action, done, truncated, reward = rb_workspace["env/obs",
-                                                                              "env/next_obs", "env/action", "env/done", "env/truncated", "env/reward"]
+                                                                              "env/next_obs", "env/action", "env/done", "env/truncated", "env/reward"] # avec env/ ou sans?
                 optim_agent.zero_grad(set_to_none=True)
                 std = linear_schedule(cfg.std_schedule, step)
                 must_bootstrap = torch.logical_or(~done[1], truncated[1])
                 # TOLD Update
                 # here, agent collects the current state-action pairs and their associated Q-values
                 zs = []
-                consistency_loss, reward_loss, value_loss, priority_loss = 0, 0, 0, 0
+                consistency_loss, reward_loss, value_loss = 0, 0, 0 #priority_loss = 0, 0, 0, 0
                 for t in range(cfg.horizon):
                     ag_rsa(rb_workspace, t=t, n_steps=1)
-                    ag_told(rb_workspace, t=t, n_steps=1)  # n_step?
-                    z = rb_workspace["latent"]
+                    ag_told(rb_workspace, t=t, n_steps=1)  # n_step?                  
+                    z, reward_pred, q_values_rb_1, q_values_rb_2 = rb_workspace["latent", "reward", "critic1/q_values", "critic2/q_values"]
                     zs.append(z.detach())
-                    dynamics_pred = rb_workspace["dynamics"]
-                    reward_pred = rb_workspace["reward"]
-                    actor = rb_workspace["actor"]
-                    q_values_rb_1 = rb_workspace["critic1/q_values"]
-                    q_values_rb_2 = rb_workspace["critic2/q_values"] 
                     with torch.no_grad():
                         ag_rsa(rb_workspace, t=t+1, n_steps=1)
-                        ag_told(rb_workspace, t=t+1, n_steps=1)
-                        next_z = rb_workspace["latent"]
-                        reward = rb_workspace["reward"]
-                        action = rb_workspace["action"]
-                        #ag_target(rb_workspace, t=t+1, n_steps=1)
-                        q_target_rb_1 = target_told_agent[4].predict_values(next_z, action)
-                        q_target_rb_2 = target_told_agent[5].predict_values(next_z, action)
+                        ag_target(rb_workspace, t=t+1, n_steps=1)
+                        next_z, reward, action, q_target_rb_1, q_target_rb_2 = rb_workspace["latent", "reward", "action", "target-critic1/q_values", "target-critic2/q_values"]
                         td_target = reward + cfg.discount * \
                                 torch.min(q_target_rb_1, q_target_rb_2)
                     zs.append(z.detach())
@@ -216,6 +198,7 @@ def run_tdmpc(cfg, logger, trial=None):
                     value_loss += rho * (mse(q_values_rb_1, td_target) + mse(q_values_rb_2, td_target))
                     # priority_loss += rho * (l1(q_values_rb_1, td_target) + l1(q_values_rb_2, td_target)) ???????????????
                     # Store the loss
+
                 # optimize model
                 total_loss, weighted_loss, grad_norm = optimizers(cfg, told_agent, optim_agent, consistency_loss, reward_loss, value_loss, weights=0.3)
 
