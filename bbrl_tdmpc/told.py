@@ -17,9 +17,7 @@ from utils_tdmpc import *
 def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     """
     inspiré de create_td3_agent de bbrl
-    ajout de noise?
-    Question
-    https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/algos/td3/td3.py#L48
+    ajout de noise? https://github.com/osigaud/bbrl_algos/blob/095d849b6b77e068a6c38b3ce200982ffbbeecd4/src/bbrl_algos/algos/td3/td3.py#L48
     """
 
     encoder = EncoderAgent(cfg)
@@ -50,7 +48,7 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     
     RandomShiftsAug_agent = RandomShiftsAug(cfg)
 
-    tr_agent = Agents(train_env_agent, told_agent) # doit-on ajouter le traget agent?
+    tr_agent = Agents(train_env_agent, told_agent, target_told_agent) # doit-on ajouter le target agent?
     ev_agent = Agents(eval_env_agent, told_agent)
 
     # agents that are executed on a complete workspace
@@ -138,7 +136,7 @@ def run_tdmpc(cfg, logger, trial=None):
     # possible?, inspiré de https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/tdmpc.py#L59
     optim_agent = torch.optim.Adam(told_agent.parameters(), lr=cfg.lr)
     pi_optim_agent = torch.optim.Adam(told_agent[3].parameters(), lr=cfg.lr)
-    # total_loss, weighted_loss, grad_norm = setup_optimizers(cfg, told_agent, optim_agent, 0, 0, 0) # weights?
+    # total_loss, weighted_loss, grad_norm = optimizers(cfg, told_agent, optim_agent, 0, 0, 0) # weights?
 
     # 6) Define the steps counters and the train loop
     nb_steps = 0
@@ -155,7 +153,6 @@ def run_tdmpc(cfg, logger, trial=None):
             train_workspace.copy_n_last_steps(1)
             train_agent(train_workspace, t=1, n_steps=cfg.algorithm.n_steps_train)
         else:
-            
             train_agent(train_workspace, t=0, n_steps=cfg.algorithm.n_steps_train)
 
         transition_workspace = train_workspace.get_transitions() 
@@ -169,8 +166,7 @@ def run_tdmpc(cfg, logger, trial=None):
             if nb_steps > cfg.algorithm.learning_starts:
                 rb_workspace = rb.get_shuffled(cfg.algorithm.batch_size)
                 # Collect episode from TDMPC
-                obs, next_obs, action, done, truncated, reward = rb_workspace["env/obs",
-                                                                              "env/next_obs", "env/action", "env/done", "env/truncated", "env/reward"] # avec env/ ou sans?
+                done, truncated, reward = rb_workspace["env/done", "env/truncated", "env/reward"] # avec env/ ou sans?
                 optim_agent.zero_grad(set_to_none=True)
                 std = linear_schedule(cfg.std_schedule, step)
                 must_bootstrap = torch.logical_or(~done[1], truncated[1])
@@ -186,7 +182,7 @@ def run_tdmpc(cfg, logger, trial=None):
                     with torch.no_grad():
                         ag_rsa(rb_workspace, t=t+1, n_steps=1)
                         ag_target(rb_workspace, t=t+1, n_steps=1)
-                        next_z, reward, action, q_target_rb_1, q_target_rb_2 = rb_workspace["latent", "reward", "action", "target-critic1/q_values", "target-critic2/q_values"]
+                        next_z, reward, q_target_rb_1, q_target_rb_2 = rb_workspace["latent", "reward", "target-critic1/q_values", "target-critic2/q_values"]
                         td_target = reward + cfg.discount * \
                                 torch.min(q_target_rb_1, q_target_rb_2)
                     zs.append(z.detach())
