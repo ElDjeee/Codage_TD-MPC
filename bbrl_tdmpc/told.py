@@ -161,11 +161,10 @@ def run_tdmpc(cfg, logger, trial=None):
         if step > 0:
             train_workspace.zero_grad()
             train_workspace.copy_n_last_steps(1)
-            train_agent(train_workspace, t=1,
-                        n_steps=cfg.algorithm.n_steps_train)
+            train_agent(train_workspace, t=1, n_steps=cfg.algorithm.n_steps_train)
         else:
-            train_agent(train_workspace, t=0,
-                        n_steps=cfg.algorithm.n_steps_train)
+            
+            train_agent(train_workspace, t=0, n_steps=cfg.algorithm.n_steps_train)
 
         transition_workspace = train_workspace.get_transitions()  # pourquoi filter_key?
         action = transition_workspace["action"]

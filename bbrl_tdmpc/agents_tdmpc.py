@@ -54,6 +54,7 @@ def enc(cfg):
     """Returns a TOLD encoder without relying on agents that require 't'."""
     if cfg.modality == 'pixels':
         C = int(3 * cfg.frame_stack)
+       
         conv_layers = [
             nn.Conv2d(C, cfg.num_channels, 7, stride=2, padding=3), nn.ReLU(),
             nn.Conv2d(cfg.num_channels, cfg.num_channels, 5, stride=2, padding=2), nn.ReLU(),
@@ -81,6 +82,8 @@ def enc(cfg):
     #return nn.Sequential(*layers)
 
 
+
+
 class EncoderAgent(Agent):
     def __init__(self, cfg):
         super().__init__()
@@ -94,6 +97,20 @@ class EncoderAgent(Agent):
 
     def forward(self, t, **kwargs):
         obs = self.get(("env/env_obs", t))
+        
+       
+        # if not isinstance(obs, torch.Tensor):
+        #     raise TypeError(f"Les observations doivent être des tenseurs PyTorch, obtenu : {type(obs)}")
+        
+        # obs = obs.float() / 255.0  # Normalise à [0, 1]
+        # obs = obs * 2.0 - 1.0  # Passe à [-1, 1] si nécessaire
+
+        # if obs.ndim == 2:  # Supposition : [canaux, hauteur, largeur]
+        #     obs = obs.unsqueeze(0)  # Devient [1, canaux, hauteur, largeur]
+
+        
+            
+        
         latent = self.net(obs)
         self.set(("latent", t), latent)
 
@@ -263,3 +280,9 @@ class LoggerAgent(Agent):
 
     def isVideoEnable(self):
         return self.logger.video is not None
+
+
+
+
+
+

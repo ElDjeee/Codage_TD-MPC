@@ -30,12 +30,16 @@ logger:
       verbose: False
       every_n_seconds: 10
 
+train_steps: 10000
+episode_length: 50
 lr: 0.001
 algorithm:
-      train_steps: 1000
-      episode_length: 100
       buffer_size: 10000  
-        
+      _steps_train: 5
+      n_updates: 10
+      learning_starts: 1000
+      batch_size: 64
+
 
       
       seed:
