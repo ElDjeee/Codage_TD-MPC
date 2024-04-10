@@ -38,17 +38,14 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     told_agent = Agents(encoder, dynamics_model, reward_model, actor, critic_1, critic_2) # agent TOLD
     
     # -------- changement --------
-    # target_told_agent = copy.deepcopy(told_agent) est-ce qu'on en a besoin?
-
-    # On crée des clones des critiques avec de nouveaux noms pour le target agent
-    target_critic_1 = CriticAgent(cfg, name="target-critic1")
-    target_critic_2 = CriticAgent(cfg, name="target-critic2")
-    target_told_agent = Agents(encoder, dynamics_model, reward_model, actor, target_critic_1, target_critic_2)
+    target_told_agent = copy.deepcopy(told_agent) # est-ce qu'on en a besoin?
+    target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
+    target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
     # -------- changement --------
     
     RandomShiftsAug_agent = RandomShiftsAug(cfg)
 
-    tr_agent = Agents(train_env_agent, told_agent, target_told_agent) # doit-on ajouter le target agent?
+    tr_agent = Agents(train_env_agent, told_agent) #, target_told_agent) # doit-on ajouter le target agent?
     ev_agent = Agents(eval_env_agent, told_agent)
 
     # agents that are executed on a complete workspace
@@ -64,7 +61,7 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
         RandomShiftsAug_agent
     )
 
-def optimizers(cfg, told_agent, optim_agent, consistency_loss, reward_loss, value_loss, weights=0.3):  # WEIGHTS?
+def optimizers(cfg, told_agent, optim_agent, consistency_loss, reward_loss, value_loss): 
     """
     inspiré de 
     https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/tdmpc.py#L209
@@ -72,8 +69,7 @@ def optimizers(cfg, told_agent, optim_agent, consistency_loss, reward_loss, valu
     total_loss = cfg.consistency_coef * consistency_loss.clamp(max=1e4) + \
         cfg.reward_coef * reward_loss.clamp(max=1e4) + \
         cfg.value_coef * value_loss.clamp(max=1e4)
-    # weights???, https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/helper.py#L253
-    weighted_loss = (total_loss.squeeze(1) * weights).mean()
+    weighted_loss = total_loss.squeeze(1).mean()
     weighted_loss.register_hook(lambda grad: grad * (1/cfg.horizon))
     weighted_loss.backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(
