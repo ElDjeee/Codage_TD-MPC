@@ -85,27 +85,31 @@ def compute_actor_loss(cfg, pi_optim_agent, told_agent, zs):  # DONE
     """
     https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/tdmpc.py#L153
     """
+    pi = told_agent[3]
+    critic1 = told_agent[4]
+    critic2 = told_agent[5]
+    
     pi_optim_agent.zero_grad(set_to_none=True)
-    set_requires_grad(told_agent[4], False)
-    set_requires_grad(told_agent[5], False)
-
+    set_requires_grad(critic1, False)
+    set_requires_grad(critic2, False)
+    
     pi_loss = 0
     for t, z in enumerate(zs):
-        mu = torch.tanh(told_agent[3].predict_action(z))
+        mu = torch.tanh(pi.predict_action(z))
         std = cfg.min_std
         if std > 0:
             std = torch.ones_like(mu) * std
             mu = TruncatedNormal(mu, std).sample(clip=0.3)
         a = mu
-        Q = torch.min(told_agent[4].predict_value(
-            z, a), told_agent[5].predict_value(z, a))
+        Q = torch.min(critic1.predict_value(
+            z, a), critic2.predict_value(z, a))
         pi_loss += -Q.mean() * (cfg.rho ** t)
     pi_loss.backward()
     torch.nn.utils.clip_grad_norm_(
-        told_agent[3].parameters(), cfg.grad_clip_norm, error_if_nonfinite=False)
+        pi.parameters(), cfg.grad_clip_norm, error_if_nonfinite=False)
     pi_optim_agent.step() 
-    set_requires_grad(told_agent[4], True)
-    set_requires_grad(told_agent[5], True)
+    set_requires_grad(critic1, True)
+    set_requires_grad(critic2, True)
     return pi_loss.item()
 
 

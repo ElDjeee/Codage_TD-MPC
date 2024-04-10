@@ -20,7 +20,8 @@ class NormalizeImg(Agent):  # DONE
 
     def forward(self, t, **kwargs):
         obs = self.get(("env/env_obs", t)) # obs ou latent?
-        return obs.div(255.)
+        res = obs.div(255.)
+        self.set(("normalize", t), res)
 
 class Flatten(Agent):  # DONE
     """Flattens its input to a (batched) vector."""
@@ -30,7 +31,8 @@ class Flatten(Agent):  # DONE
 
     def forward(self, t, **kwargs):
         obs = self.get(("env/env_obs", t)) # obs ou latent?
-        return obs.view(obs.size(0), -1)
+        res = obs.view(obs.size(0), -1)
+        self.set(("flatten", t), res)
 
 # def enc(cfg):
 #     """Returns a TOLD encoder."""
