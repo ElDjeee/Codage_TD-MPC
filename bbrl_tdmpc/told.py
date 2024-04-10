@@ -4,14 +4,39 @@ from bbrl.agents import Agents, TemporalAgent
 from bbrl.workspace import Workspace
 
 from bbrl.utils.replay_buffer import ReplayBuffer
-from bbrl_algos.models.envs import get_env_agents
+from bbrl.agents.gymnasium import ParallelGymAgent
+from functools import partial
 
 from agents_tdmpc import *
 from utils_tdmpc import *
+from env import make_env
 
 # ------------------------------------------------------------------------
 # We already made Train(Agent) and Evaluate(Agent) classes in train.py file ( without gymnasium)
 # making train and evaluate agents ( using gymnasium). Inspired from bbrl examples  :
+
+def local_get_env_agents(cfg):
+    eval_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=False,
+        ),
+        cfg.algorithm.nb_evals,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.eval,
+    )
+    train_env_agent = ParallelGymAgent(
+        partial(
+            make_env,
+            cfg.gym_env.env_name,
+            autoreset=True,
+        ),
+        cfg.algorithm.n_envs,
+        include_last_state=True,
+        seed=cfg.algorithm.seed.train,
+    )
+    return train_env_agent, eval_env_agent
 
 
 def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
@@ -77,7 +102,7 @@ def optimizers(cfg, told_agent, optim_agent, consistency_loss, reward_loss, valu
     optim_agent.step()
     return total_loss, weighted_loss, grad_norm
 
-def compute_actor_loss(cfg, pi_optim_agent, told_agent, zs):  # DONE
+def compute_actor_loss(cfg, pi_optim_agent, told_agent, zs): # DONE
     """
     https://github.com/nicklashansen/tdmpc/blob/f4d85eca7419039b71bab2234ffc8aca378dd313/src/algorithm/tdmpc.py#L153
     """
@@ -113,8 +138,8 @@ def run_tdmpc(cfg, logger, trial=None):
     # 1) Do we need to create the logger ?
     best_reward = float("-inf")
 
-    # 2) Create the environment agents (pourquoi get_env_agents?)
-    train_env_agent, eval_env_agent = get_env_agents(cfg)
+    # 2) Create the environment agents 
+    train_env_agent, eval_env_agent = local_get_env_agents(cfg)
 
     # 2) Create the TOLD agents
     (
