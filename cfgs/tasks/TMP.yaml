@@ -1,0 +1,120 @@
+# ADD (Example cartpole v2)
+action_repeat: 4
+obs_shape: ???
+action_shape: ???
+action_dim: ???
+
+train_steps: 3000000/${action_repeat}
+frame_stack: 3
+num_channels: 32
+img_size: 25
+lr: 3e-4
+batch_size: 256
+
+# environment
+task: quadruped-run
+modality: 'pixels'
+#action_repeat: ???
+discount: 0.99
+episode_length: 1000/${action_repeat}
+
+# planning
+iterations: 6
+num_samples: 512
+num_elites: 64
+mixture_coef: 0.05
+min_std: 0.05
+temperature: 0.5
+momentum: 0.1
+
+# learning
+max_buffer_size: 100000
+horizon: 5
+reward_coef: 0.5
+value_coef: 0.1
+consistency_coef: 2
+rho: 0.5
+kappa: 0.1
+std_schedule: linear(0.5, ${min_std}, 25000)
+horizon_schedule: linear(1, ${horizon}, 25000)
+per_alpha: 0.6
+per_beta: 0.4
+grad_clip_norm: 10
+seed_steps: 5000
+update_freq: 2
+tau: 0.01
+
+# architecture
+enc_dim: 256
+mlp_dim: 512
+latent_dim: 50
+
+# wandb (insert your own)
+use_wandb: false
+wandb_project: none
+wandb_entity: none
+
+# misc
+seed: 1
+exp_name: default
+eval_freq: 20000
+eval_episodes: 10
+save_video: false
+save_model: false
+
+
+
+
+
+
+
+save_best: False
+plot_agents: False
+collect_stats: True
+stats_directory: ../../../src/bbrl_algos/algos/algorithm_stats/
+
+logger:
+      classname: bbrl.utils.logger.TFLogger
+      log_dir: ./droQ_logs/
+      verbose: False
+      every_n_seconds: 10
+
+
+algorithm:
+
+      seed:
+            train: 335
+            eval: 983
+            q: 123
+            explorer: 456
+            torch: 789
+            act: 234
+
+      nb_seeds: 1
+      n_envs: 1
+      n_steps_train: 256
+      n_steps: 2_000_000
+      max_grad_norm: 0.5
+      buffer_size: 1000000
+      batch_size: 256
+      eval_interval: 2000
+      nb_evals: 10
+      learning_starts: 5000
+      tau_target: 0.005
+      discount_factor: 0.99
+      action_noise: 0.1
+      optim_n_updates: 3
+      architecture:
+            actor_hidden_size: [56, 56]
+            critic_hidden_size: [256, 256]
+
+gym_env:
+      env_name: BipedalWalker-v3
+
+actor_optimizer:
+      classname: torch.optim.Adam
+      lr: 3e-4
+
+critic_optimizer:
+      classname: torch.optim.Adam
+      lr: 3e-3
