@@ -1,0 +1,51 @@
+seed: 1
+frame_stack: 4
+img_size: 84
+num_channels: 32
+latent_dim: 256
+action_dim: 2
+mlp_dim: 256
+modality: pixels
+action_repeat: 8
+save_best: false
+plot_agents: false
+log_dir: ./tmp
+video_dir: ${log_dir}/videos
+logger:
+  classname: bbrl.utils.logger.TFLogger
+  log_dir: ./droQ_logs/
+  verbose: false
+  every_n_seconds: 10
+train_steps: 10000
+episode_length: 50
+lr: 0.001
+algorithm:
+  buffer_size: 10000
+  _steps_train: 5
+  n_updates: 10
+  learning_starts: 1000
+  batch_size: 64
+  seed:
+    train: 33
+    eval: 100
+    q: 123
+    explorer: 456
+    torch: 789
+  nb_seeds: 1
+  n_envs: 1
+  n_steps_train: 256
+  n_steps: 300000
+  max_grad_norm: 0.5
+  buffer:
+    max_size: 150000
+    batch_size: 256
+    learning_starts: 2000
+  eval_interval: 2000
+  nb_evals: 10
+  tau_target: 0.005
+  discount_factor: 0.99
+  action_noise: 0.1
+  optim_n_updates: 3
+  architecture: null
+gym_env:
+  env_name: CartPole-v1

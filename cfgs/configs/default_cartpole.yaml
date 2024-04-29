@@ -1,6 +1,7 @@
 defaults:
   - _self_
 
+seed: 1
 frame_stack: 4
 img_size: 84
 num_channels: 32
@@ -14,7 +15,7 @@ action_repeat: 8  #according to the previous cartpole.yaml file
 
 
 # The structure bellow is inspired by BBRL/dqn and td3
-﻿save_best: False
+save_best: False
 plot_agents: False
 
 log_dir: ./tmp

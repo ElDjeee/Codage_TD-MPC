@@ -19,7 +19,7 @@ def local_get_env_agents(cfg):
     eval_env_agent = ParallelGymAgent(
         partial(
             make_env,
-            cfg.gym_env.env_name,
+            cfg,
             autoreset=False,
         ),
         cfg.algorithm.nb_evals,
@@ -29,7 +29,7 @@ def local_get_env_agents(cfg):
     train_env_agent = ParallelGymAgent(
         partial(
             make_env,
-            cfg.gym_env.env_name,
+            cfg,
             autoreset=True,
         ),
         cfg.algorithm.n_envs,
@@ -64,8 +64,10 @@ def create_told_agent(cfg, train_env_agent, eval_env_agent):  # orthogonal_init?
     
     # -------- changement --------
     target_told_agent = copy.deepcopy(told_agent) # est-ce qu'on en a besoin?
-    target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
-    target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
+    # target_told_agent[4] = target_told_agent[4].set_name("target-critic1")
+    # target_told_agent[5] = target_told_agent[5].set_name("target-critic2")
+    target_told_agent[4].set_name("target-critic1")
+    target_told_agent[5].set_name("target-critic2")
     # -------- changement --------
     
     RandomShiftsAug_agent = RandomShiftsAug(cfg)
