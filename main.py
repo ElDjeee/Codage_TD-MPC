@@ -7,6 +7,10 @@ import torch
 from torch import nn
 from omegaconf import DictConfig
 
+import bbrl_gymnasium as gym
+#from gymnasium import register
+from gymnasium.wrappers import AutoResetWrapper
+
 from bbrl import get_arguments, get_class
 from bbrl.agents import Agents, TemporalAgent
 from bbrl_algos.models.actors import ContinuousDeterministicActor
@@ -18,24 +22,41 @@ from bbrl_algos.models.loggers import Logger
 from bbrl.utils.replay_buffer import ReplayBuffer
 from bbrl.workspace import Workspace
 
+from preprocess import *
 
+from tqdm import tqdm
 
-def get_env_agents(cfg, *, autoreset=True, include_last_state=True):
-    if "wrappers" in cfg.gym_env:
-        print("using wrappers:", cfg.gym_env.wrappers)
-        # wrappers_name_list = cfg.gym_env.wrappers.split(',')
-        wrappers_list = []
-        wr = get_class(cfg.gym_env.wrappers)
-        # for i in range(len(wrappers_name_list)):
-        wrappers_list.append(wr)
-        wrappers = wrappers_list
-        print(wrappers)
-    else:
-        wrappers = []
+from told import EncoderAgent, DynamicsAgent, RewardAgent, PiAgent, QAgent
 
+def make_env_TDMPC(env_name, cfg, autoreset=True):
+    # cartpole_spec = gym.spec("CartPole-v1")
+    # register(
+    #     id="CartPole-v2",
+    #     entry_point= __name__ + ":CartPoleEnv",
+    #     max_episode_steps=cartpole_spec.max_episode_steps,
+    #     reward_threshold=cartpole_spec.reward_threshold,
+    # )
+
+    env = gym.make("CartPoleContinuous-v1", render_mode="rgb_array")
+    env = PixelOnlyObservation(env)
+    env = ResizeObservation(env, cfg.img_size)
+    env = GrayScaleObservation(env)
+    env = BinarizeObservation(env, 230, True)
+    env = FrameStack(env, 3)
+
+    if autoreset:
+        env = AutoResetWrapper(env)
+
+    cfg.obs_shape = tuple(int(x) for x in env.observation_space.shape)
+    cfg.action_shape = tuple(int(x) for x in env.action_space.shape)
+    cfg.action_dim = env.action_space.shape[0]
+
+    return env
+
+def get_env_agents(cfg, autoreset=True, include_last_state=True):
     train_env_agent = ParallelGymAgent(
         partial(
-            make_env, cfg.gym_env.env_name, autoreset=autoreset, wrappers=wrappers
+            make_env_TDMPC, cfg.gym_env.env_name, cfg, autoreset=autoreset
         ),
         cfg.algorithm.n_envs,
         include_last_state=include_last_state,
@@ -44,7 +65,7 @@ def get_env_agents(cfg, *, autoreset=True, include_last_state=True):
 
     # Test environment (implictly, autoreset=False, which is always the case for evaluation environments)
     eval_env_agent = ParallelGymAgent(
-        partial(make_env, cfg.gym_env.env_name, wrappers=wrappers),
+        partial(make_env_TDMPC, cfg.gym_env.env_name, cfg),
         cfg.algorithm.nb_evals,
         include_last_state=include_last_state,
         seed=cfg.algorithm.seed.eval,
@@ -52,88 +73,96 @@ def get_env_agents(cfg, *, autoreset=True, include_last_state=True):
 
     return train_env_agent, eval_env_agent
 
-def create_td3_agent(cfg, train_env_agent, eval_env_agent):
-    obs_size, act_size = train_env_agent.get_obs_and_actions_sizes()
-    actor = ContinuousDeterministicActor(
-        obs_size,
-        cfg.algorithm.architecture.actor_hidden_size,
-        act_size,
-        seed=cfg.algorithm.seed.act,
-    )
-    # target_actor = copy.deepcopy(actor)
-    noise_agent = AddGaussianNoise(cfg.algorithm.action_noise)
-    tr_agent = Agents(train_env_agent, actor, noise_agent)
-    ev_agent = Agents(eval_env_agent, actor)
+def create_td3_agent(cfg, train_env_agent, eval_env_agent, device):
+    encoder = EncoderAgent(device, cfg)
+    dynamics = DynamicsAgent(device, cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, cfg.latent_dim)
+    reward = RewardAgent(device, cfg.latent_dim+cfg.action_dim, cfg.mlp_dim, 1)
+    pi = PiAgent(device, cfg.latent_dim, cfg.mlp_dim, cfg.action_dim)
+    Qvalues = QAgent(device, cfg)
 
-    critic_1 = ContinuousQAgent(
-        obs_size,
-        cfg.algorithm.architecture.critic_hidden_size,
-        act_size,
-        seed=cfg.algorithm.seed.q,
-    )
-    target_critic_1 = copy.deepcopy(critic_1).set_name("target-critic1")
-    critic_2 = ContinuousQAgent(
-        obs_size, cfg.algorithm.architecture.critic_hidden_size, act_size
-    )
-    target_critic_2 = copy.deepcopy(critic_2).set_name("target-critic2")
+    tr_agent = Agents(train_env_agent, encoder, pi, reward, dynamics)
+    ev_agent = Agents(eval_env_agent, encoder, pi, reward, dynamics)
 
     train_agent = TemporalAgent(tr_agent)
     eval_agent = TemporalAgent(ev_agent)
     return (
         train_agent,
         eval_agent,
-        actor,
-        critic_1,
-        target_critic_1,
-        critic_2,
-        target_critic_2,
+        encoder,
+        dynamics,
+        reward,
+        pi,
+        Qvalues
     )
 
-def setup_optimizers(cfg, actor, critic_1, critic_2):
-    actor_optimizer_args = get_arguments(cfg.actor_optimizer)
-    parameters = actor.parameters()
-    actor_optimizer = get_class(cfg.actor_optimizer)(parameters, **actor_optimizer_args)
-    critic_optimizer_args = get_arguments(cfg.critic_optimizer)
-    parameters = nn.Sequential(critic_1, critic_2).parameters()
-    critic_optimizer = get_class(cfg.critic_optimizer)(
-        parameters, **critic_optimizer_args
-    )
-    return actor_optimizer, critic_optimizer
+def setup_optimizers(cfg, encoder, Qvalues):
+    encoder_optimizer_args = get_arguments(cfg.actor_optimizer)
+    parameters = encoder.parameters()
+    encoder_optimizer = get_class(cfg.actor_optimizer)(parameters, **encoder_optimizer_args)
 
-def run_tdmpc(cfg, logger, trial=None):
+    Qvalues_optimizer_args = get_arguments(cfg.critic_optimizer)
+    parameters = Qvalues.parameters()
+    Qvalues_optimizer = get_class(cfg.critic_optimizer)(parameters, **Qvalues_optimizer_args)
+
+    return encoder_optimizer, Qvalues_optimizer
+
+def run_tdmpc(cfg, trial=None):
     # 1)  Build the  logger
     best_reward = float("-inf")
     delta_list = []
     mean = 0
+
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 
     # 2) Create the environment agents
     train_env_agent, eval_env_agent = get_env_agents(cfg)
 
     # 3) Create the TD3 Agent
     (
-        train_agent,
+        train_agent, # TODO: make him Collect trajectory
         eval_agent,
-        actor,
-        critic_1,
-        target_critic_1,
-        critic_2,
-        target_critic_2,
-    ) = create_td3_agent(cfg, train_env_agent, eval_env_agent)
-    ag_actor = TemporalAgent(actor)
-    # ag_target_actor = TemporalAgent(target_actor)
-    q_agent_1 = TemporalAgent(critic_1)
-    target_q_agent_1 = TemporalAgent(target_critic_1)
-    q_agent_2 = TemporalAgent(critic_2)
-    target_q_agent_2 = TemporalAgent(target_critic_2)
+        encoder,
+        dynamics,
+        reward,
+        pi,
+        Qvalues
+    ) = create_td3_agent(cfg, train_env_agent, eval_env_agent, device)
+    ag_encoder = TemporalAgent(encoder)
+    ag_dynamics = TemporalAgent(dynamics)
+    ag_reward = TemporalAgent(reward)
+    ag_pi = TemporalAgent(pi)
+    ag_Qvalues = TemporalAgent(Qvalues)
+
     train_workspace = Workspace()
     rb = ReplayBuffer(max_size=cfg.algorithm.buffer_size)
 
     # Configure the optimizer
-    actor_optimizer, critic_optimizer = setup_optimizers(cfg, actor, critic_1, critic_2)
+    encoder_optimizer, Qvalues_optimizer = setup_optimizers(cfg, encoder, Qvalues)
     nb_steps = 0
     tmp_steps = 0
 
-    
+    logger = Logger(cfg)
+
+    # Trick to compute the values of:
+    cfg.train_steps = int(int(cfg.train_steps.split("/")[0]) / int(cfg.train_steps.split("/")[1]))
+    cfg.episode_length = int(int(cfg.episode_length.split("/")[0]) / int(cfg.episode_length.split("/")[1]))
+
+    # TMP
+    cfg.algorithm.n_steps_train = 50
+
+    for step in tqdm(range(0, cfg.train_steps+cfg.episode_length, cfg.episode_length)):
+        if step > 0:
+            train_workspace.zero_grad()
+            train_workspace.copy_n_last_steps(1)
+            train_agent(train_workspace, t=1, n_steps=cfg.algorithm.n_steps_train)
+        else:
+            train_agent(train_workspace, t=0, n_steps=cfg.algorithm.n_steps_train)
+
+        transition_workspace = train_workspace.get_transitions()
+        action = transition_workspace["action"]
+        nb_steps += action[0].shape[0]
+        if nb_steps > 0 or cfg.algorithm.n_steps_train > 1:
+            rb.put(transition_workspace)
 
 @hydra.main(
     config_path="./cfgs/tasks",
@@ -153,8 +182,7 @@ def main(cfg_raw: DictConfig):
     if "optuna" in cfg_raw:
         launch_optuna(cfg_raw, run_tdmpc)
     else:
-        logger = Logger(cfg_raw)
-        run_tdmpc(cfg_raw, logger)
+        run_tdmpc(cfg_raw)
 
 if __name__ == "__main__":
     main()

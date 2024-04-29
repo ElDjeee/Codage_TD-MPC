@@ -56,16 +56,12 @@ class EncoderAgent(Agent):
             
             in_shape = (C, cfg.img_size, cfg.img_size)
             x = torch.randn(*in_shape).unsqueeze(0)
-            print(f'Initial input shape: {x.shape}')
 
             for i, layer in enumerate(layers):
                 x = layer(x)
-                print(f'Output shape after layer {i} ({layer.__class__.__name__}): {x.shape}')
             
             out_shape = x.shape
-            num_features = np.prod(out_shape[1:]).item()  # Converts shape to total number of features
-
-            print(f'Final shape before linear layer: {num_features}')
+            num_features = np.prod(out_shape[1:]).item()
 
             layers.append(Flatten())
             layers.append(nn.Linear(num_features, cfg.latent_dim))
@@ -129,9 +125,7 @@ class RewardAgent(Agent):
         latent = self.get(("latent", t)).to(self.device)
         action = self.get(("action", t)).to(self.device)
 
-        print(latent.shape, action.shape)
-
-        x = torch.cat([latent, action.view(1, 1), action.view(1, 1)], dim=1)
+        x = torch.cat([latent, action.view(1, 1)], dim=1)
 
         self.set(("reward", t), self.net(x))
 
@@ -154,8 +148,7 @@ class DynamicsAgent(Agent):
         latent = self.get(("latent", t)).to(self.device)
         action = self.get(("action", t)).to(self.device)
 
-        # action.view(1, 1), action.view(1, 1) are tmp, just to fit the shape (TODO)
-        x = torch.cat([latent, action.view(1, 1), action.view(1, 1)], dim=1)
+        x = torch.cat([latent, action.view(1, 1)], dim=1)
         z = self.net(x)
 
         self.set(("z", t), z)
