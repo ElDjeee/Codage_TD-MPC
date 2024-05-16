@@ -7,7 +7,7 @@ action_dim: ???
 train_steps: 3000000/${action_repeat}
 frame_stack: 3
 num_channels: 32
-img_size: 24
+img_size: 84
 lr: 3e-4
 batch_size: 256
 
@@ -95,7 +95,7 @@ algorithm:
       n_steps_train: 256
       n_steps: 2_000_000
       max_grad_norm: 0.5
-      buffer_size: 1000000
+      buffer_size: 100000
       batch_size: 256
       eval_interval: 2000
       nb_evals: 10
