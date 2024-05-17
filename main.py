@@ -540,7 +540,7 @@ def set_seed(seed):
 
 @hydra.main(
 	config_path="./cfgs/tasks",
-	config_name="bbrm_env.yaml",
+	config_name="bbrl_env.yaml",
 	# config_name="sac_lunar_lander_continuous.yaml",
 	# config_name="sac_cartpolecontinuous.yaml",
 	# config_name="sac_pendulum.yaml",
