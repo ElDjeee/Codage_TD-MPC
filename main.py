@@ -132,19 +132,19 @@ def linear_schedule(schdl, step):
 	raise NotImplementedError(schdl)
 
 # TODO TMP FOR TEST PLAN
-def estimate_value(cfg, z, actions, horizon, dynamics, reward, QValues, pi, eval=False):
+def estimate_value(cfg, z, actions, horizon, model, eval=False):
 	"""Estimate value of a trajectory starting at latent state z and executing given actions."""
 	with torch.no_grad():
 		G, discount = 0, 1
 		for t in range(horizon):
-			z, r = dynamics.predict_z(z, actions[t]), reward.predict_reward(z, actions[t])
+			z, r = model.dynamics.predict_z(z, actions[t]), model.reward.predict_reward(z, actions[t])
 			G += discount * r
 			discount *= cfg.discount
-		G += discount * torch.min(*QValues.predict_q(z, pi.predict_pi(z, cfg.min_std)))
+		G += discount * torch.min(*model.QValues.predict_q(z, model.pi.predict_pi(z, cfg.min_std)))
 		return G
 
 # TODO TMP FOR TEST PLAN
-def plan(cfg, device, encoder, dynamics, reward, QValues, pi, obs, _prev_mean, self_std, eval_mode=False, step=None, t0=True):
+def plan(cfg, device, model, obs, _prev_mean, self_std, eval_mode=False, step=None, t0=True):
 	with torch.no_grad():
 		# Seed steps
 		if step < cfg.seed_steps:
@@ -156,13 +156,13 @@ def plan(cfg, device, encoder, dynamics, reward, QValues, pi, obs, _prev_mean, s
 		num_pi_trajs = int(cfg.mixture_coef * cfg.num_samples)
 		if num_pi_trajs > 0:
 			pi_actions = torch.empty(horizon, num_pi_trajs, cfg.action_dim, device=device)
-			z = encoder.predict_latent(obs).repeat(num_pi_trajs, 1)
+			z = model.encoder.predict_latent(obs).repeat(num_pi_trajs, 1)
 			for tbis in range(horizon):
-				pi_actions[tbis] = pi.predict_pi(z, cfg.min_std)
-				z = dynamics.predict_z(z, pi_actions[tbis]).to(device)
+				pi_actions[tbis] = model.pi.predict_pi(z, cfg.min_std)
+				z = model.dynamics.predict_z(z, pi_actions[tbis]).to(device)
 
 		# Initialize state and parameters
-		z = encoder.predict_latent(obs).repeat(cfg.num_samples+num_pi_trajs, 1)
+		z = model.encoder.predict_latent(obs).repeat(cfg.num_samples+num_pi_trajs, 1)
 		mean = torch.zeros(horizon, cfg.action_dim, device=device)
 		std = 2*torch.ones(horizon, cfg.action_dim, device=device)
 		if not t0 and _prev_mean is not None:
@@ -176,7 +176,7 @@ def plan(cfg, device, encoder, dynamics, reward, QValues, pi, obs, _prev_mean, s
 				actions = torch.cat([actions, pi_actions], dim=1)
 
 			# Compute elite actions
-			value = estimate_value(cfg, z, actions, horizon, dynamics, reward, QValues, pi, eval_mode).nan_to_num_(0)
+			value = estimate_value(cfg, z, actions, horizon, model, eval_mode).nan_to_num_(0)
 			elite_idxs = torch.topk(value.squeeze(1), cfg.num_elites, dim=0).indices
 			elite_value, elite_actions = value[elite_idxs], actions[:, elite_idxs]
 
@@ -230,12 +230,12 @@ class RandomShiftsAug(nn.Module):
 		return F.grid_sample(x, grid, padding_mode='zeros', align_corners=False)
 
 # TODO HANDLE MODEL TARGET
-def _td_target(cfg, next_obs, curr_reward, encoder, QValues, pi):
+def _td_target(cfg, next_obs, curr_reward, model, model_target):
 	"""Compute the TD-target from a reward and the observation at the following time step."""
 	with torch.no_grad():
-		next_z = encoder.predict_latent(next_obs)
+		next_z = model.encoder.predict_latent(next_obs)
 		td_target = curr_reward + cfg.discount * \
-			torch.min(*QValues.predict_q(next_z, pi.predict_pi(next_z, cfg.min_std)))
+			torch.min(*model_target.QValues.predict_q(next_z, model.pi.predict_pi(next_z, cfg.min_std)))
 		return td_target
 
 __REDUCE__ = lambda b: 'mean' if b else 'none'
@@ -258,33 +258,33 @@ def track_q_grad(QValues, enable=True):
 	for m in [QValues.q1, QValues.q2]:
 		set_requires_grad(m, enable)
 
-def update_pi(zs, cfg, pi_optim, QValues, pi):
+def update_pi(zs, cfg, pi_optim, model):
 	"""Update policy using a sequence of latent states."""
 	pi_optim.zero_grad(set_to_none=True)
-	track_q_grad(QValues, False)
+	track_q_grad(model.QValues, False)
 
 	# Loss is a weighted sum of Q-values
 	pi_loss = 0
 	for t,z in enumerate(zs):
-		a = pi.predict_pi(z, cfg.min_std)
-		Q = torch.min(*QValues.predict_q(z, a))
+		a = model.pi.predict_pi(z, cfg.min_std)
+		Q = torch.min(*model.QValues.predict_q(z, a))
 		pi_loss += -Q.mean() * (cfg.rho ** t)
 		#print(-Q.mean(), end=" ")
 
 	pi_loss.backward()
-	torch.nn.utils.clip_grad_norm_(pi.net.parameters(), cfg.grad_clip_norm, error_if_nonfinite=False)
+	torch.nn.utils.clip_grad_norm_(model.pi.net.parameters(), cfg.grad_clip_norm, error_if_nonfinite=False)
 	pi_optim.step()
-	track_q_grad(QValues, True)
+	track_q_grad(model.QValues, True)
 	return pi_loss.item()
 
-def ema(m_param, m_target_param, tau):
+def ema(m, m_target, tau):
 	"""Update slow-moving average of online network (target network) at rate tau."""
 	with torch.no_grad():
-		for p, p_target in zip(m_param, m_target_param):
+		for p, p_target in zip(m.parameters(), m_target.parameters()):
 			p_target.data.lerp_(p.data, tau)
 
 # TODO MODEL TARGET
-def update(replay_buffer, step, cfg, device, optim, pi_optim, encoder, dynamics, reward, pi, QValues, aug):
+def update(replay_buffer, step, cfg, device, optim, pi_optim, model, model_target, aug):
 	"""Main update function. Corresponds to one iteration of the TOLD model learning."""
 	workspace = replay_buffer.get_shuffled(cfg.batch_size)
 	obs = workspace.get_full("env/env_obs").to(device)
@@ -293,29 +293,24 @@ def update(replay_buffer, step, cfg, device, optim, pi_optim, encoder, dynamics,
 	curr_reward = workspace.get_full("reward").to(device)
 
 	optim.zero_grad(set_to_none=True)
-	std = linear_schedule(cfg.std_schedule, step)
+	self_std = linear_schedule(cfg.std_schedule, step)
 	
-	encoder.enc.train()
-	dynamics.net.train()
-	reward.net.train()
-	pi.net.train()
-	QValues.q1.train()
-	QValues.q2.train()
+	model.train()
 
 	# Representation
-	z = encoder.predict_latent(aug(obs[0][0].unsqueeze(0).unsqueeze(1)))
+	z = model.encoder.predict_latent(aug(obs[0][0].unsqueeze(0).unsqueeze(1)))
 	zs = [z.detach()]
 
 	consistency_loss, reward_loss, value_loss, priority_loss = 0, 0, 0, 0
 	for t in range(cfg.horizon):
 
 		# Predictions
-		Q1, Q2 = QValues.predict_q(z, action[0][t].unsqueeze(0).unsqueeze(1)) # TODO why do we have Tensor[2, 256] for our workspace elements ? 
-		z, reward_pred = dynamics.predict_z(z, action[0][t].unsqueeze(0).unsqueeze(1)), reward.predict_reward(z, action[0][t].unsqueeze(0).unsqueeze(1))
+		Q1, Q2 = model.QValues.predict_q(z, action[0][t].unsqueeze(0).unsqueeze(1)) # TODO why do we have Tensor[2, 256] for our workspace elements ? 
+		z, reward_pred = model.dynamics.predict_z(z, action[0][t].unsqueeze(0).unsqueeze(1)), model.reward.predict_reward(z, action[0][t].unsqueeze(0).unsqueeze(1))
 		with torch.no_grad():
 			next_obs = aug(next_obses[0][t].unsqueeze(0).unsqueeze(1))
-			next_z = encoder.predict_latent(next_obs)
-			td_target = _td_target(cfg, next_obs, curr_reward[0][t].unsqueeze(0).unsqueeze(1), encoder, QValues, pi) # TODO why we cannot use curr_reward[t] ?
+			next_z = model_target.encoder.predict_latent(next_obs)
+			td_target = _td_target(cfg, next_obs, curr_reward[0][t].unsqueeze(0).unsqueeze(1), model, model_target) # TODO why we cannot use curr_reward[t] ?
 		zs.append(z.detach())
 
 		# Losses
@@ -332,42 +327,15 @@ def update(replay_buffer, step, cfg, device, optim, pi_optim, encoder, dynamics,
 	weighted_loss = (total_loss.squeeze(1)).mean()
 	weighted_loss.register_hook(lambda grad: grad * (1/cfg.horizon))
 	weighted_loss.backward()
-	grad_norm = torch.nn.utils.clip_grad_norm_(
-		(
-            list(encoder.enc.parameters()) + 
-            list(dynamics.net.parameters()) + 
-            list(reward.net.parameters()) + 
-            list(pi.net.parameters()) +
-            list(QValues.q1.parameters()) +
-			list(QValues.q2.parameters())
-        ), cfg.grad_clip_norm, error_if_nonfinite=False)
+	grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip_norm, error_if_nonfinite=False)
 	optim.step()
 
 	# Update policy + target network
-	pi_loss = update_pi(zs, cfg, pi_optim, QValues, pi)
+	pi_loss = update_pi(zs, cfg, pi_optim, model)
 	if step % cfg.update_freq == 0:
-		ema((
-            list(encoder.enc.parameters()) + 
-            list(dynamics.net.parameters()) + 
-            list(reward.net.parameters()) + 
-            list(pi.net.parameters()) +
-            list(QValues.q1.parameters()) +
-			list(QValues.q2.parameters())
-        ), (
-            list(encoder.enc.parameters()) + 
-            list(dynamics.net.parameters()) + 
-            list(reward.net.parameters()) + 
-            list(pi.net.parameters()) +
-            list(QValues.q1.parameters()) +
-			list(QValues.q2.parameters())
-        ), cfg.tau)
+		ema(model, model_target, cfg.tau)
 
-	encoder.enc.eval()
-	dynamics.net.eval()
-	reward.net.eval()
-	pi.net.eval()
-	QValues.q1.eval()
-	QValues.q2.eval()
+	model.eval()
 
 	return {'consistency_loss': float(consistency_loss.mean().item()),
 			'reward_loss': float(reward_loss.mean().item()),
@@ -375,24 +343,61 @@ def update(replay_buffer, step, cfg, device, optim, pi_optim, encoder, dynamics,
 			'pi_loss': pi_loss,
 			'total_loss': float(total_loss.mean().item()),
 			'weighted_loss': float(weighted_loss.mean().item()),
-			'grad_norm': float(grad_norm)}
+			'grad_norm': float(grad_norm)}, self_std
 
 # TODO TMP FOR TEST EVAL
-def evaluate(env, num_episodes, step, cfg, device, encoder, dynamics, reward, pi, QValues):
+def evaluate(env, num_episodes, step, cfg, device, model, _prev_mean, self_std):
 	"""Evaluate a trained agent and optionally save a video."""
 	episode_rewards = []
 	for i in range(num_episodes):
-		_prev_mean = None
-		self_std = linear_schedule(cfg.std_schedule, 0)
 		obs, done, ep_reward, t = env._reset(0)['env_obs'], False, 0, 0
 		while not done:
-			action, _prev_mean = plan(cfg, device, encoder, dynamics, reward, QValues, pi, obs, _prev_mean, self_std, eval_mode=True, step=step, t0=(step == 0))
+			action, _prev_mean = plan(cfg, device, model, obs, _prev_mean, self_std, eval_mode=True, step=step, t0=(step == 0))
 			obs, _, _, done, curr_reward, _, _ = env._step(0, action.cpu()).values() # 0 because we have only one env
 		
 			ep_reward += curr_reward[0].item()
 			t += 1
 		episode_rewards.append(ep_reward)
-	return np.nanmean(episode_rewards)
+	return np.nanmean(episode_rewards), _prev_mean
+
+class TOLD(nn.Module):
+	def __init__(self, cfg, encoder, dynamics, reward, pi, QValues, device):
+		super().__init__()
+		self.cfg = cfg
+
+		self.encoder = encoder
+		self.dynamics = dynamics
+		self.reward = reward
+		self.pi = pi
+		self.QValues = QValues
+
+		self.device = device
+	
+	def parameters(self):
+		return (
+            list(self.encoder.enc.parameters()) + 
+            list(self.dynamics.net.parameters()) + 
+            list(self.reward.net.parameters()) + 
+            list(self.pi.net.parameters()) +
+            list(self.QValues.q1.parameters()) +
+            list(self.QValues.q2.parameters())
+        )
+	
+	def train(self):
+		self.encoder.enc.train()
+		self.dynamics.net.train()
+		self.reward.net.train()
+		self.pi.net.train()
+		self.QValues.q1.train()
+		self.QValues.q2.train()
+	
+	def eval(self):
+		self.encoder.enc.eval()
+		self.dynamics.net.eval()
+		self.reward.net.eval()
+		self.pi.net.eval()
+		self.QValues.q1.eval()
+		self.QValues.q2.eval()
 
 
 
@@ -419,12 +424,11 @@ def run_tdmpc(cfg, trial=None):
 		QValues
 	) = create_td3_agent(cfg, train_env_agent, eval_env_agent, device)
 
-	encoder.enc.eval()
-	dynamics.net.eval()
-	reward.net.eval()
-	pi.net.eval()
-	QValues.q1.eval()
-	QValues.q2.eval()
+	model = TOLD(cfg, encoder, dynamics, reward, pi, QValues, device).to(device)
+	model.eval()
+
+	model_target = copy.deepcopy(model).to(device)
+	model_target.eval()
 
 	ag_encoder = TemporalAgent(encoder)
 	ag_dynamics = TemporalAgent(dynamics)
@@ -438,16 +442,7 @@ def run_tdmpc(cfg, trial=None):
 	aug = RandomShiftsAug(cfg)
 
 	# Configure the optimizer
-	optim, pi_optim = setup_optimizers(cfg, 
-		(
-            list(encoder.enc.parameters()) + 
-            list(dynamics.net.parameters()) + 
-            list(reward.net.parameters()) + 
-            list(pi.net.parameters()) +
-            list(QValues.q1.parameters()) +
-            list(QValues.q2.parameters())
-        )
-	)
+	optim, pi_optim = setup_optimizers(cfg, model.parameters())
 	nb_steps = 0
 	tmp_steps = 0
 
@@ -458,6 +453,7 @@ def run_tdmpc(cfg, trial=None):
 	cfg.episode_length = int(int(cfg.episode_length.split("/")[0]) / int(cfg.episode_length.split("/")[1]))
 
 	episode_idx, start_time = 0, time.time()
+	self_std = linear_schedule(cfg.std_schedule, 0)
 	for step in tqdm(range(0, cfg.train_steps+cfg.episode_length, cfg.episode_length)):
 		"""if step > 0:
 			train_workspace.zero_grad()
@@ -472,16 +468,14 @@ def run_tdmpc(cfg, trial=None):
 		if nb_steps > 0 or cfg.algorithm.n_steps_train > 1:
 			rb.put(transition_workspace)"""
 
-		start_t = 1 if (step > 0) else 0
 		_prev_mean = None
-		self_std = linear_schedule(cfg.std_schedule, 0)
 
 		obs = train_env_agent._reset(0)['env_obs'] # 0 because we have only one env
 		done = False
 		t = 0
 		cum_reward = 0
 		while done is False:
-			action, _prev_mean = plan(cfg, device, encoder, dynamics, reward, QValues, pi, obs, _prev_mean, self_std, eval_mode=False, step=step, t0=(step == 0))
+			action, _prev_mean = plan(cfg, device, model, obs, _prev_mean, self_std, eval_mode=False, step=step, t0=(step == 0))
 			obs, _, _, done, curr_reward, _, _ = train_env_agent._step(0, action.cpu()).values() # 0 because we have only one env
 		
 			train_workspace.set("env/env_obs", t, obs)
@@ -505,7 +499,8 @@ def run_tdmpc(cfg, trial=None):
 		if step >= cfg.seed_steps:
 			num_updates = cfg.seed_steps if step == cfg.seed_steps else cfg.episode_length
 			for i in range(num_updates):
-				train_metrics.update(update(rb, step+i, cfg, device, optim, pi_optim, encoder, dynamics, reward, pi, QValues, aug))
+				res, self_std = update(rb, step+i, cfg, device, optim, pi_optim, model, model_target, aug)
+				train_metrics.update(res)
 
 		# Log training episode
 		episode_idx += 1
@@ -527,7 +522,7 @@ def run_tdmpc(cfg, trial=None):
 			print()
 			print("="*96)
 			#torch.cuda.empty_cache()
-			common_metrics['episode_reward'] = evaluate(eval_env_agent, cfg.eval_episodes, step, cfg, device, encoder, dynamics, reward, pi, QValues)
+			common_metrics['episode_reward'], _prev_mean = evaluate(eval_env_agent, cfg.eval_episodes, step, cfg, device, model, _prev_mean, self_std)
 			with open("log.txt", "a") as f:
 				f.write('eval : ' + str(common_metrics) + '\n')
 				print("eval : ", common_metrics)
