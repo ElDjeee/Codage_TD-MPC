@@ -16,4 +16,21 @@ Our project is inspired by the research conducted by Hansen et al.
 See the source code below.: https://github.com/nicklashansen/tdmpc
 
 
-## HowTo
+## Installation
+
+The project is available on [GitHub](https://github.com/ElDjeee/Codage_TD-MPC).
+
+Before continuing, you need to install [Python3](https://www.python.org/downloads/).
+
+Then, follow these steps in a terminal to install the project:
+
+```bash
+git clone https://github.com/ElDjeee/Codage_TD-MPC.git
+cd Codage_TD-MPC
+python3 -m pip install -r requirements.txt
+```
+
+Once this is done, you can run the project with this command:
+```bash
+python3 src/main.py
+```
