@@ -79,8 +79,7 @@ class EncoderAgent(Agent):
 					nn.Conv2d(C, cfg.num_channels, 7, stride=2), nn.ReLU(),
 					nn.Conv2d(cfg.num_channels, cfg.num_channels, 5, stride=2), nn.ReLU(),
 					nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU(),
-					#nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()] # Why this doesnt work for cfg.img_size = 25 TODO
-					nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()]
+					nn.Conv2d(cfg.num_channels, cfg.num_channels, 3, stride=2), nn.ReLU()] # Why this doesnt work for cfg.img_size = 25 TODO
 			
 			in_shape = (C, cfg.img_size, cfg.img_size)
 			x = torch.randn(*in_shape).unsqueeze(0)
