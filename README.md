@@ -32,5 +32,7 @@ python3 -m pip install -r requirements.txt
 
 Once this is done, you can run the project with this command:
 ```bash
-python3 src/main.py
+python3 src/train.py task=quadruped-run modality=pixels
 ```
+
+You can replace the task with any tasks inside the tasks.txt file
